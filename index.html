@@ -625,6 +625,7 @@ function renderInvoices(){
         <span class="stamp ${v.due<=0?'ok':'no'}">${v.due<=0?'مدفوعة':'آجل'}</span>
         <button class="icon-btn edit" data-preview="${v.id}" title="معاينة الفاتورة">👁️</button>
         <button class="icon-btn share" data-share="${v.id}" title="مشاركة الفاتورة">📤</button>
+        ${isAdmin() ? `<button class="icon-btn edit" data-editinv="${v.id}" title="تعديل الفاتورة">✏️</button><button class="icon-btn del" data-delinv="${v.id}" title="حذف الفاتورة">🗑️</button>` : ''}
       </div>
     </div>`).join('')}</div>`}
   `;
@@ -715,18 +716,34 @@ async function shareInvoice(inv){
     printInvoice(inv);
   }
 }
-function invoiceModal(type){
+function reverseInvoiceEffects(inv){
+  inv.lines.forEach(l=>{
+    state.items = state.items.map(it => it.id===l.itemId ? {...it, qty: it.qty + (inv.type==='buy' ? -l.qty : l.qty)} : it);
+  });
+  state.parties = state.parties.map(p => p.id===inv.partyId ? {...p, balance:(p.balance||0)-inv.due} : p);
+}
+async function deleteInvoice(inv){
+  if(!isAdmin() || !inv) return;
+  if(!confirm(`متأكد إنك عايز تحذف فاتورة ${inv.partyName}؟ هيرجع تأثيرها على المخزون والرصيد.`)) return;
+  reverseInvoiceEffects(inv);
+  state.invoices = state.invoices.filter(v=>v.id!==inv.id);
+  await persist('items'); await persist('parties'); await persist('invoices');
+  render();
+  showToast('تم حذف الفاتورة');
+}
+function invoiceModal(type, existingInv){
+  const isEdit = !!existingInv;
   const relevant = state.parties.filter(p=>p.type === (type==='sell'?'customer':'supplier'));
-  let lines = [];
+  let lines = isEdit ? existingInv.lines.map(l=>({itemId:l.itemId, qty:l.qty, price:l.price})) : [];
   const html = `
   <div class="modal wide">
-    <div class="modal-head"><h3>${type==='sell'?'فاتورة بيع جديدة':'فاتورة شراء جديدة'}</h3><button class="x-btn" data-close>✕</button></div>
+    <div class="modal-head"><h3>${isEdit ? 'تعديل الفاتورة' : (type==='sell'?'فاتورة بيع جديدة':'فاتورة شراء جديدة')}</h3><button class="x-btn" data-close>✕</button></div>
     <div class="modal-body">
       <div class="grid2">
         <label class="field"><span class="lbl">${type==='sell'?'العميل':'المورد'}</span>
-          <select id="inv_party"><option value="">اختر...</option>${relevant.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>
+          <select id="inv_party"><option value="">اختر...</option>${relevant.map(p=>`<option value="${p.id}" ${isEdit && p.id===existingInv.partyId?'selected':''}>${esc(p.name)}</option>`).join('')}</select>
         </label>
-        <label class="field"><span class="lbl">التاريخ</span><input id="inv_date" type="date" value="${todayStr()}"></label>
+        <label class="field"><span class="lbl">التاريخ</span><input id="inv_date" type="date" value="${isEdit?existingInv.date:todayStr()}"></label>
       </div>
       <div style="display:flex;align-items:center;justify-content:space-between;margin:8px 0;">
         <span class="muted" style="font-size:12px;font-weight:600;">الأصناف</span>
@@ -734,9 +751,9 @@ function invoiceModal(type){
       </div>
       <div id="linesWrap"></div>
       <div class="total-line"><span style="font-weight:600;">الإجمالي</span><b id="totalDisplay">${money(0)}</b></div>
-      <label class="field"><span class="lbl">المبلغ المدفوع الآن</span><input id="inv_paid" type="number" value="0"></label>
+      <label class="field"><span class="lbl">المبلغ المدفوع الآن</span><input id="inv_paid" type="number" value="${isEdit?existingInv.paid:0}"></label>
       <p class="muted" style="font-size:12px;">المتبقي (آجل): <b id="dueDisplay" style="color:var(--brick);">${money(0)}</b></p>
-      <button class="btn btn-primary" id="saveInvBtn" style="width:100%;justify-content:center;margin-top:6px;">حفظ الفاتورة</button>
+      <button class="btn btn-primary" id="saveInvBtn" style="width:100%;justify-content:center;margin-top:6px;">${isEdit?'حفظ التعديلات':'حفظ الفاتورة'}</button>
     </div>
   </div>`;
   const modal = openModal(html);
@@ -778,24 +795,36 @@ function invoiceModal(type){
   modal.querySelector('#saveInvBtn').addEventListener('click', async ()=>{
     const partyId = modal.querySelector('#inv_party').value;
     if(!partyId || lines.length===0) return;
+    if(isEdit) reverseInvoiceEffects(existingInv);
     const total = lines.reduce((s,l)=>s+l.qty*l.price,0);
     const paid = Math.min(+modal.querySelector('#inv_paid').value || 0, total);
     const due = Math.max(total-paid,0);
     const party = state.parties.find(p=>p.id===partyId);
     const previousBalance = party ? (party.balance||0) : 0;
-    const inv = { id:uid(), type, partyId, partyName: party?party.name:'', date: modal.querySelector('#inv_date').value || todayStr(),
-      lines: lines.map(l=>({...l, itemName: state.items.find(i=>i.id===l.itemId)?.name || ''})), total, paid, due, previousBalance, createdBy: currentUser.name, createdById: currentUser.id };
+    const inv = { id: isEdit?existingInv.id:uid(), type, partyId, partyName: party?party.name:'', date: modal.querySelector('#inv_date').value || todayStr(),
+      lines: lines.map(l=>({...l, itemName: state.items.find(i=>i.id===l.itemId)?.name || ''})), total, paid, due, previousBalance,
+      createdBy: isEdit?existingInv.createdBy:currentUser.name, createdById: isEdit?existingInv.createdById:currentUser.id };
+    if(isEdit) inv.editedBy = currentUser.name;
     inv.lines.forEach(l=>{ state.items = state.items.map(it => it.id===l.itemId ? {...it, qty: it.qty + (type==='buy'? l.qty : -l.qty)} : it); });
     state.parties = state.parties.map(p => p.id===partyId ? {...p, balance:(p.balance||0)+due} : p);
-    state.invoices.push(inv);
+    if(isEdit) state.invoices = state.invoices.map(v=>v.id===inv.id?inv:v);
+    else state.invoices.push(inv);
     await persist('items'); await persist('parties'); await persist('invoices');
     closeModal(modal); render();
+    showToast(isEdit ? 'تم تعديل الفاتورة' : 'تم حفظ الفاتورة');
   });
 }
 function bindInvoices(){
   document.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click', ()=>{ invoiceTab=b.dataset.tab; render(); }));
   const btn = document.getElementById('newInvBtn');
   if(btn) btn.addEventListener('click', ()=>invoiceModal(invoiceTab));
+  document.querySelectorAll('[data-editinv]').forEach(b=>b.addEventListener('click', ()=>{
+    const inv = state.invoices.find(v=>v.id===b.dataset.editinv);
+    if(inv) invoiceModal(inv.type, inv);
+  }));
+  document.querySelectorAll('[data-delinv]').forEach(b=>b.addEventListener('click', ()=>{
+    deleteInvoice(state.invoices.find(v=>v.id===b.dataset.delinv));
+  }));
   document.querySelectorAll('[data-preview]').forEach(b=>b.addEventListener('click', ()=>{ previewInvoice(state.invoices.find(v=>v.id===b.dataset.preview)); }));
   document.querySelectorAll('[data-share]').forEach(b=>b.addEventListener('click', ()=>{ shareInvoice(state.invoices.find(v=>v.id===b.dataset.share)); }));
 }
