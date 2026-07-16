@@ -336,7 +336,7 @@ function renderSetupAdmin(){
 function navItemsFor(){
   const all = [
     {key:'dashboard', label:'الرئيسية', ic:'🏠', roles:['admin','rep']},
-    {key:'inventory', label:'المخزون', ic:'📦', roles:['admin','rep']},
+    {key:'inventory', label:'المخزون', ic:'📦', roles:['admin']},
     {key:'audit', label:'الجرد', ic:'🧮', roles:['admin']},
     {key:'invoices', label:'الفواتير', ic:'🧾', roles:['admin','rep']},
     {key:'parties', label:'العملاء والموردين', ic:'👥', roles:['admin','rep']},
@@ -400,6 +400,22 @@ function closeModal(el){ el.remove(); modalStack = modalStack.filter(m=>m!==el);
 
 /* ---------------- Dashboard ---------------- */
 function renderDashboard(){
+  if(!isAdmin()){
+    const myInvoices = state.invoices.filter(v => v.createdById === currentUser.id || (!v.createdById && v.createdBy === currentUser.name));
+    const myTodaySales = myInvoices.filter(v=>v.type==='sell' && v.date===todayStr()).reduce((s,v)=>s+v.total,0);
+    const myTotalSales = myInvoices.filter(v=>v.type==='sell').reduce((s,v)=>s+v.total,0);
+    const myRecent = [...myInvoices].sort((a,b)=> a.date<b.date?1:-1).slice(0,8);
+    return `
+    <div class="grid-stats" style="grid-template-columns:1fr 1fr;">
+      <div class="card"><div class="stat-top"><span class="stat-label">مبيعاتي اليوم</span><div class="stat-icon" style="background:#C79A2E22;color:#C79A2E;">📈</div></div><div class="stat-value">${money(myTodaySales)}</div></div>
+      <div class="card"><div class="stat-top"><span class="stat-label">إجمالي مبيعاتي</span><div class="stat-icon" style="background:#0F5C4F22;color:#0F5C4F;">🧾</div></div><div class="stat-value">${money(myTotalSales)}</div></div>
+    </div>
+    <div class="card" style="margin-top:18px;">
+      <h3 class="section-title">فواتيري الأخيرة</h3>
+      ${myRecent.length===0 ? `<p class="muted" style="font-size:14px;">لا توجد فواتير لك بعد.</p>` :
+        myRecent.map(v=>`<div class="row-line"><div><div style="font-weight:600;">${esc(v.partyName)}</div><div class="muted" style="font-size:12px;">${fmtDate(v.date)}</div></div><span style="font-weight:700;">${money(v.total)}</span></div>`).join('')}
+    </div>`;
+  }
   const invValue = state.items.reduce((s,i)=>s+i.qty*i.buyPrice,0);
   const lowStock = state.items.filter(i=>i.qty<=i.minQty);
   const customersDue = state.parties.filter(p=>p.type==='customer').reduce((s,p)=>s+Math.max(p.balance,0),0);
@@ -581,7 +597,11 @@ function bindAudit(){
 let invoiceTab = 'sell';
 function renderInvoices(){
   if(!isAdmin() && invoiceTab==='buy') invoiceTab='sell';
-  const list = state.invoices.filter(v=>v.type===invoiceTab).sort((a,b)=>a.date<b.date?1:-1);
+  let list = state.invoices.filter(v=>v.type===invoiceTab);
+  if(!isAdmin()){
+    list = list.filter(v => v.createdById === currentUser.id || (!v.createdById && v.createdBy === currentUser.name));
+  }
+  list = list.sort((a,b)=>a.date<b.date?1:-1);
   return `
   <div class="toolbar">
     <div class="tabs">
@@ -593,7 +613,7 @@ function renderInvoices(){
   ${list.length===0 ? `<div class="empty"><div class="circle">🧾</div><p>لا توجد فواتير ${invoiceTab==='sell'?'بيع':'شراء'} بعد.</p></div>` :
     `<div class="list-gap">${list.map(v=>`
     <div class="card party-card">
-      <div><div style="font-weight:600;">${esc(v.partyName)}</div><div class="muted" style="font-size:12px;">${fmtDate(v.date)} · ${v.lines.length} صنف ${v.createdBy?('· بواسطة '+esc(v.createdBy)):''}</div></div>
+      <div><div style="font-weight:600;">${esc(v.partyName)}</div><div class="muted" style="font-size:12px;">${fmtDate(v.date)} · ${v.lines.length} صنف ${(isAdmin() && v.createdBy)?('· بواسطة '+esc(v.createdBy)):''}</div></div>
       <div style="display:flex;align-items:center;gap:10px;">
         <span style="font-weight:700;">${money(v.total)}</span>
         <span class="stamp ${v.due<=0?'ok':'no'}">${v.due<=0?'مدفوعة':'آجل'}</span>
@@ -727,7 +747,7 @@ function invoiceModal(type){
     const due = Math.max(total-paid,0);
     const party = state.parties.find(p=>p.id===partyId);
     const inv = { id:uid(), type, partyId, partyName: party?party.name:'', date: modal.querySelector('#inv_date').value || todayStr(),
-      lines: lines.map(l=>({...l, itemName: state.items.find(i=>i.id===l.itemId)?.name || ''})), total, paid, due, createdBy: currentUser.name };
+      lines: lines.map(l=>({...l, itemName: state.items.find(i=>i.id===l.itemId)?.name || ''})), total, paid, due, createdBy: currentUser.name, createdById: currentUser.id };
     inv.lines.forEach(l=>{ state.items = state.items.map(it => it.id===l.itemId ? {...it, qty: it.qty + (type==='buy'? l.qty : -l.qty)} : it); });
     state.parties = state.parties.map(p => p.id===partyId ? {...p, balance:(p.balance||0)+due} : p);
     state.invoices.push(inv);
