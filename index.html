@@ -644,10 +644,14 @@ function buildInvoiceHTML(inv){
         <tbody>${inv.lines.map(l=>`<tr><td style="padding:9px;border-bottom:1px solid #E4DFD1;">${esc(l.itemName)}</td><td style="padding:9px;border-bottom:1px solid #E4DFD1;text-align:center;">${l.qty}</td><td style="padding:9px;border-bottom:1px solid #E4DFD1;text-align:center;">${money(l.price)}</td><td style="padding:9px;border-bottom:1px solid #E4DFD1;text-align:center;">${money(l.qty*l.price)}</td></tr>`).join('')}</tbody>
       </table>
       <div style="display:flex;justify-content:flex-end;">
-        <div style="width:250px;font-size:14px;">
+        <div style="width:270px;font-size:14px;">
           <div style="display:flex;justify-content:space-between;padding:5px 0;"><span>الإجمالي</span><b>${money(inv.total)}</b></div>
           <div style="display:flex;justify-content:space-between;padding:5px 0;"><span>المدفوع</span><span>${money(inv.paid)}</span></div>
-          <div style="display:flex;justify-content:space-between;padding:5px 0;border-top:1px solid #E4DFD1;margin-top:4px;"><span>المتبقي (آجل)</span><b style="color:${inv.due>0?'#A8462E':'#0F5C4F'};">${money(inv.due)}</b></div>
+          <div style="display:flex;justify-content:space-between;padding:5px 0;border-top:1px solid #E4DFD1;margin-top:4px;"><span>المتبقي من الفاتورة</span><b style="color:${inv.due>0?'#A8462E':'#0F5C4F'};">${money(inv.due)}</b></div>
+          ${(inv.previousBalance||0) > 0 ? `
+          <div style="display:flex;justify-content:space-between;padding:5px 0;margin-top:6px;"><span>رصيد قديم</span><span style="color:#A8462E;">${money(inv.previousBalance)}</span></div>
+          <div style="display:flex;justify-content:space-between;padding:8px 0;border-top:2px solid #0F5C4F;margin-top:2px;"><span style="font-weight:700;">إجمالي المستحق</span><b style="color:#A8462E;font-size:16px;">${money((inv.previousBalance||0) + inv.due)}</b></div>
+          ` : ``}
         </div>
       </div>
       <div style="margin-top:32px;padding-top:16px;border-top:2px dashed #E4DFD1;display:flex;justify-content:space-between;align-items:center;gap:16px;">
@@ -778,8 +782,9 @@ function invoiceModal(type){
     const paid = Math.min(+modal.querySelector('#inv_paid').value || 0, total);
     const due = Math.max(total-paid,0);
     const party = state.parties.find(p=>p.id===partyId);
+    const previousBalance = party ? (party.balance||0) : 0;
     const inv = { id:uid(), type, partyId, partyName: party?party.name:'', date: modal.querySelector('#inv_date').value || todayStr(),
-      lines: lines.map(l=>({...l, itemName: state.items.find(i=>i.id===l.itemId)?.name || ''})), total, paid, due, createdBy: currentUser.name, createdById: currentUser.id };
+      lines: lines.map(l=>({...l, itemName: state.items.find(i=>i.id===l.itemId)?.name || ''})), total, paid, due, previousBalance, createdBy: currentUser.name, createdById: currentUser.id };
     inv.lines.forEach(l=>{ state.items = state.items.map(it => it.id===l.itemId ? {...it, qty: it.qty + (type==='buy'? l.qty : -l.qty)} : it); });
     state.parties = state.parties.map(p => p.id===partyId ? {...p, balance:(p.balance||0)+due} : p);
     state.invoices.push(inv);
