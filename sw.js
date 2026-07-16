@@ -1,5 +1,5 @@
-const CACHE_NAME = 'farfetch-eg-v1';
-const CORE_ASSETS = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
+const CACHE_NAME = 'farfetch-eg-v2';
+const CORE_ASSETS = ['./manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -15,8 +15,17 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
+/* Network-first: always try to fetch the latest version first.
+   Only fall back to the cached copy if there is no internet connection. */
 self.addEventListener('fetch', (event) => {
   event.respondWith(
-    caches.match(event.request).then((cached) => cached || fetch(event.request))
+    fetch(event.request)
+      .then((response) => {
+        const copy = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy)).catch(()=>{});
+        return response;
+      })
+      .catch(() => caches.match(event.request))
   );
 });
+
