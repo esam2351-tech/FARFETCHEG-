@@ -428,12 +428,41 @@ function renderDashboard(){
   const suppliersDue = state.parties.filter(p=>p.type==='supplier').reduce((s,p)=>s+Math.max(p.balance,0),0);
   const todaySales = state.invoices.filter(v=>v.type==='sell' && v.date===todayStr()).reduce((s,v)=>s+v.total,0);
   const recent = [...state.invoices].sort((a,b)=> a.date<b.date?1:-1).slice(0,6);
+  const cashierMap = {};
+  state.invoices.filter(v=>v.type==='sell').forEach(v=>{
+    const name = v.createdBy || 'غير معروف';
+    const repUser = state.users.find(u=> u.id===v.createdById) || state.users.find(u=>u.name===name);
+    const rate = repUser ? (repUser.commissionPerPiece||0) : 0;
+    if(!cashierMap[name]) cashierMap[name] = {name, qty:0, amount:0, count:0, rate};
+    cashierMap[name].amount += v.total;
+    cashierMap[name].count += 1;
+    v.lines.forEach(l=>{ cashierMap[name].qty += (+l.qty||0); });
+  });
+  const cashierReport = Object.values(cashierMap).map(c=>({...c, commission: c.qty * (c.rate||0)})).sort((a,b)=>b.amount-a.amount);
+  const totalCommission = cashierReport.reduce((s,c)=>s+c.commission,0);
   return `
   <div class="grid-stats">
     <div class="card"><div class="stat-top"><span class="stat-label">قيمة المخزون</span><div class="stat-icon" style="background:#0F5C4F22;color:#0F5C4F;">📦</div></div><div class="stat-value">${money(invValue)}</div></div>
     <div class="card"><div class="stat-top"><span class="stat-label">مبيعات اليوم</span><div class="stat-icon" style="background:#C79A2E22;color:#C79A2E;">📈</div></div><div class="stat-value">${money(todaySales)}</div></div>
     <div class="card"><div class="stat-top"><span class="stat-label">مستحق من العملاء</span><div class="stat-icon" style="background:#A8462E22;color:#A8462E;">⬇️</div></div><div class="stat-value">${money(customersDue)}</div><div class="stat-sub">آجل</div></div>
     <div class="card"><div class="stat-top"><span class="stat-label">مستحق للموردين</span><div class="stat-icon" style="background:#0A423922;color:#0A4239;">⬆️</div></div><div class="stat-value">${money(suppliersDue)}</div><div class="stat-sub">آجل</div></div>
+  </div>
+  <div class="card" style="margin-top:18px;">
+    <h3 class="section-title">🧑‍💼 تقرير مبيعات كل كاشير (إجمالي)</h3>
+    ${cashierReport.length===0 ? `<p class="muted" style="font-size:14px;">لا توجد مبيعات مسجلة بعد.</p>` : `
+    <div class="table-wrap"><table>
+      <thead><tr><th>الكاشير</th><th>عدد الفواتير</th><th>عدد القطع</th><th>إجمالي المبلغ</th><th>العمولة</th></tr></thead>
+      <tbody>
+      ${cashierReport.map(c=>`<tr>
+        <td style="font-weight:600;">${esc(c.name)}</td>
+        <td class="muted">${c.count}</td>
+        <td class="muted">${c.qty}</td>
+        <td style="font-weight:700;color:var(--primary);">${money(c.amount)}</td>
+        <td style="font-weight:700;color:var(--gold);">${money(c.commission)}</td>
+      </tr>`).join('')}
+      <tr><td colspan="4" style="text-align:left;font-weight:700;">إجمالي العمولات</td><td style="font-weight:700;color:var(--gold);">${money(totalCommission)}</td></tr>
+      </tbody>
+    </table></div>`}
   </div>
   <div class="two-col">
     <div class="card">
@@ -944,7 +973,7 @@ function bindCollections(){
 function renderUsers(){
   return `
   <div class="toolbar">
-    <p class="muted" style="font-size:13px;margin:0;">أضف حساب لكل مندوب بكود دخول (PIN) خاص بيه.</p>
+    <p class="muted" style="font-size:13px;margin:0;">أضف حساب لكل مندوب بكود دخول (PIN) وعمولة عن كل قطعة يبيعها.</p>
     <button class="btn btn-primary" id="addUserBtn">+ إضافة مستخدم</button>
   </div>
   <div class="list-gap">
@@ -952,20 +981,29 @@ function renderUsers(){
     <div class="card party-card">
       <div style="display:flex;align-items:center;gap:10px;">
         <span class="badge ${u.role}">${u.role==='admin'?'مدير':'مندوب'}</span>
-        <span style="font-weight:600;">${esc(u.name)}</span>
+        <div>
+          <div style="font-weight:600;">${esc(u.name)}</div>
+          ${u.role==='rep' ? `<div class="muted" style="font-size:11px;">عمولة القطعة: ${money(u.commissionPerPiece||0)}</div>` : ``}
+        </div>
       </div>
-      ${u.id!==currentUser.id ? `<button class="icon-btn del" data-udel="${u.id}">🗑️</button>` : `<span class="muted" style="font-size:12px;">(أنت)</span>`}
+      <div style="display:flex;gap:6px;align-items:center;">
+        <button class="icon-btn edit" data-uedit="${u.id}">✏️</button>
+        ${u.id!==currentUser.id ? `<button class="icon-btn del" data-udel="${u.id}">🗑️</button>` : `<span class="muted" style="font-size:12px;">(أنت)</span>`}
+      </div>
     </div>`).join('')}
   </div>`;
 }
-function userModal(){
+function userModal(existingUser){
+  const isEdit = !!existingUser;
+  const f = existingUser ? {...existingUser} : {id:uid(), name:'', pin:'', role:'rep', commissionPerPiece:0};
   const html = `
   <div class="modal">
-    <div class="modal-head"><h3>إضافة مستخدم جديد</h3><button class="x-btn" data-close>✕</button></div>
+    <div class="modal-head"><h3>${isEdit?'تعديل المستخدم':'إضافة مستخدم جديد'}</h3><button class="x-btn" data-close>✕</button></div>
     <div class="modal-body">
-      <label class="field"><span class="lbl">الاسم</span><input id="u_name" placeholder="اسم المندوب"></label>
-      <label class="field"><span class="lbl">كود دخول (PIN)</span><input id="u_pin" type="password" inputmode="numeric" placeholder="مثال: 1234"></label>
-      <label class="field"><span class="lbl">الصلاحية</span><select id="u_role"><option value="rep">مندوب (صلاحيات محدودة)</option><option value="admin">مدير (كل الصلاحيات)</option></select></label>
+      <label class="field"><span class="lbl">الاسم</span><input id="u_name" placeholder="اسم المندوب" value="${esc(f.name)}"></label>
+      <label class="field"><span class="lbl">كود دخول (PIN)</span><input id="u_pin" type="password" inputmode="numeric" placeholder="مثال: 1234" value="${esc(f.pin)}"></label>
+      <label class="field"><span class="lbl">الصلاحية</span><select id="u_role"><option value="rep" ${f.role==='rep'?'selected':''}>مندوب (صلاحيات محدودة)</option><option value="admin" ${f.role==='admin'?'selected':''}>مدير (كل الصلاحيات)</option></select></label>
+      <label class="field"><span class="lbl">عمولة عن كل قطعة مباعة (جنيه)</span><input id="u_commission" type="number" step="0.01" value="${f.commissionPerPiece||0}"></label>
       <button class="btn btn-primary" id="saveUserBtn" style="width:100%;justify-content:center;margin-top:6px;">حفظ</button>
     </div>
   </div>`;
@@ -975,14 +1013,19 @@ function userModal(){
     const name = modal.querySelector('#u_name').value.trim();
     const pin = modal.querySelector('#u_pin').value.trim();
     if(!name || !pin) return;
-    state.users.push({id:uid(), name, pin, role: modal.querySelector('#u_role').value});
+    const next = {id:f.id, name, pin, role: modal.querySelector('#u_role').value, commissionPerPiece: +modal.querySelector('#u_commission').value || 0};
+    if(isEdit) state.users = state.users.map(u=>u.id===next.id?next:u);
+    else state.users.push(next);
     await persist('users');
     closeModal(modal); render();
   });
 }
 function bindUsers(){
   const addBtn = document.getElementById('addUserBtn');
-  if(addBtn) addBtn.addEventListener('click', userModal);
+  if(addBtn) addBtn.addEventListener('click', ()=>userModal(null));
+  document.querySelectorAll('[data-uedit]').forEach(b=>b.addEventListener('click', ()=>{
+    userModal(state.users.find(u=>u.id===b.dataset.uedit));
+  }));
   document.querySelectorAll('[data-udel]').forEach(b=>b.addEventListener('click', async ()=>{
     state.users = state.users.filter(u=>u.id!==b.dataset.udel); await persist('users'); render();
   }));
