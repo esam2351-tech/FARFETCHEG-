@@ -46,8 +46,7 @@
   @media (max-width:1024px){ .main{margin-right:0;} }
   header.topbar{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;position:sticky;top:0;background:rgba(247,244,236,0.95);backdrop-filter:blur(6px);border-bottom:1px solid var(--line);z-index:20;}
   .topbar h1{font-family:'Tajawal',sans-serif;font-size:20px;margin:0;font-weight:700;}
-  .menu-btn{display:none;border:none;background:var(--surface);border-radius:8px;padding:8px 10px;font-size:16px;cursor:pointer;}
-  @media (max-width:1024px){ .menu-btn{display:inline-block;} }
+  .menu-btn{display:inline-block;border:none;background:var(--surface);border-radius:8px;padding:8px 10px;font-size:16px;cursor:pointer;}
   .content{padding:20px;}
   @media (min-width:1024px){ .content{padding:28px 32px;} }
   .grid-stats{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
@@ -703,9 +702,52 @@ function buildInvoiceHTML(inv){
       </div>
     </div>`;
 }
+function buildReceiptHTML(inv){
+  return `
+    <div style="font-family:'Cairo',sans-serif;direction:rtl;color:#000;width:280px;margin:0 auto;padding:10px;background:#fff;font-weight:700;font-size:12px;">
+      <div style="text-align:center;margin-bottom:8px;">
+        <div style="font-family:'Tajawal',sans-serif;font-weight:900;font-size:17px;">FARFETCH.EG</div>
+        <div style="font-size:10px;font-weight:700;">لتجارة الملابس (رجالي/حريمي)</div>
+        <div style="font-size:11px;margin-top:2px;">${inv.type==='sell'?'فاتورة بيع':'فاتورة شراء'}</div>
+      </div>
+      <div style="border-top:1px dashed #000;margin:6px 0;"></div>
+      <div>التاريخ: ${fmtDate(inv.date)}</div>
+      <div>${inv.type==='sell'?'العميل':'المورد'}: ${esc(inv.partyName)}</div>
+      <div style="border-top:1px dashed #000;margin:6px 0;"></div>
+      ${inv.lines.map(l=>`
+        <div style="margin-bottom:6px;">
+          <div>${esc(l.itemName)}</div>
+          <div style="display:flex;justify-content:space-between;font-size:11px;">
+            <span>${l.qty} × ${money(l.price)}</span>
+            <span>${money(l.qty*l.price)}</span>
+          </div>
+        </div>`).join('')}
+      <div style="border-top:1px dashed #000;margin:6px 0;"></div>
+      <div style="display:flex;justify-content:space-between;"><span>الإجمالي</span><span>${money(inv.total)}</span></div>
+      <div style="display:flex;justify-content:space-between;"><span>المدفوع</span><span>${money(inv.paid)}</span></div>
+      <div style="display:flex;justify-content:space-between;"><span>المتبقي</span><span>${money(inv.due)}</span></div>
+      ${(inv.previousBalance||0) > 0 ? `
+      <div style="display:flex;justify-content:space-between;"><span>رصيد قديم</span><span>${money(inv.previousBalance)}</span></div>
+      <div style="border-top:1px dashed #000;margin:4px 0;"></div>
+      <div style="display:flex;justify-content:space-between;font-size:13px;"><span>إجمالي المستحق</span><span>${money((inv.previousBalance||0)+inv.due)}</span></div>
+      ` : ``}
+      <div style="border-top:1px dashed #000;margin:8px 0;"></div>
+      <div style="text-align:center;">
+        <div>عمرو عصام</div>
+        <div style="direction:ltr;">01065606550 / 01282072557</div>
+        <div style="font-size:10px;margin-top:4px;">شرم الشيخ - حي النور<br>أمام كنيسة السمائيين</div>
+        <div style="margin-top:8px;font-size:11px;">شكرًا لتعاملكم معنا 🌹</div>
+      </div>
+    </div>`;
+}
 function printInvoice(inv){
   const area = document.getElementById('printArea');
   area.innerHTML = buildInvoiceHTML(inv);
+  window.print();
+}
+function printReceipt(inv){
+  const area = document.getElementById('printArea');
+  area.innerHTML = buildReceiptHTML(inv);
   window.print();
 }
 function previewInvoice(inv){
@@ -714,14 +756,16 @@ function previewInvoice(inv){
     <div class="modal-head"><h3>معاينة الفاتورة</h3><button class="x-btn" data-close>✕</button></div>
     <div class="modal-body" style="padding:0;background:#f0ede4;">
       <div style="padding:16px;overflow-x:auto;">${buildInvoiceHTML(inv)}</div>
-      <div style="display:flex;gap:10px;padding:16px;border-top:1px solid var(--line);background:var(--surface);">
+      <div style="display:flex;gap:10px;padding:16px;border-top:1px solid var(--line);background:var(--surface);flex-wrap:wrap;">
         <button class="btn btn-primary" id="previewShareBtn" style="flex:1;justify-content:center;">📤 مشاركة</button>
+        <button class="btn" id="previewReceiptBtn" style="flex:1;justify-content:center;background:var(--primarySoft);color:var(--primary);">🖨️ طباعة إيصال كاشير</button>
       </div>
     </div>
   </div>`;
   const modal = openModal(html);
   modal.querySelectorAll('[data-close]').forEach(b=>b.addEventListener('click', ()=>closeModal(modal)));
   modal.querySelector('#previewShareBtn').addEventListener('click', ()=>{ closeModal(modal); shareInvoice(inv); });
+  modal.querySelector('#previewReceiptBtn').addEventListener('click', ()=>{ closeModal(modal); printReceipt(inv); });
 }
 async function shareInvoice(inv){
   showToast('جارِ تجهيز الفاتورة...');
