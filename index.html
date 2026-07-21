@@ -666,27 +666,27 @@ function buildInvoiceHTML(inv){
     <div style="font-family:'Cairo',sans-serif;direction:rtl;color:#1C2420;width:720px;margin:0 auto;background:#ffffff;font-weight:600;border:1px solid #E4DFD1;border-radius:16px;overflow:hidden;">
       <div style="padding:26px 30px 0;">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+          <div style="text-align:right;">
+            <span style="display:inline-block;background:#0F5C4F;color:#fff;font-weight:800;font-size:12px;padding:6px 16px;border-radius:20px;">${inv.type==='sell'?'فاتورة بيع':'فاتورة شراء'}</span>
+            <div style="margin-top:10px;font-size:11px;color:#6E7A73;font-weight:700;">رقم الفاتورة</div>
+            <div style="font-size:15px;font-weight:800;color:#1C2420;direction:ltr;text-align:right;">${esc(invNum)}</div>
+            <div style="margin-top:6px;font-size:12px;color:#6E7A73;font-weight:700;">📅 ${fmtDate(inv.date)}</div>
+          </div>
           <div style="display:flex;align-items:center;gap:12px;">
+            <div>
+              <div style="font-family:'Tajawal',sans-serif;font-weight:900;font-size:24px;color:#0F5C4F;letter-spacing:0.5px;text-align:left;">FARFETCH.EG</div>
+              <div style="font-size:11px;font-weight:800;color:#C79A2E;margin-top:2px;text-align:left;">لتجارة الملابس (رجالي/حريمي)</div>
+            </div>
             <div style="width:56px;height:56px;border-radius:14px;background:#0F5C4F;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
               <span style="font-family:'Tajawal',sans-serif;font-weight:900;font-size:28px;color:#C79A2E;">F</span>
             </div>
-            <div>
-              <div style="font-family:'Tajawal',sans-serif;font-weight:900;font-size:24px;color:#0F5C4F;letter-spacing:0.5px;">FARFETCH.EG</div>
-              <div style="font-size:11px;font-weight:800;color:#C79A2E;margin-top:2px;">لتجارة الملابس (رجالي/حريمي)</div>
-            </div>
-          </div>
-          <div style="text-align:left;">
-            <span style="display:inline-block;background:#0F5C4F;color:#fff;font-weight:800;font-size:12px;padding:6px 16px;border-radius:20px;">${inv.type==='sell'?'فاتورة بيع':'فاتورة شراء'}</span>
-            <div style="margin-top:10px;font-size:11px;color:#6E7A73;font-weight:700;">رقم الفاتورة</div>
-            <div style="font-size:15px;font-weight:800;color:#1C2420;direction:ltr;">${esc(invNum)}</div>
-            <div style="margin-top:6px;font-size:12px;color:#6E7A73;font-weight:700;">📅 ${fmtDate(inv.date)}</div>
           </div>
         </div>
         <div style="border-top:2px solid #0F5C4F;margin-top:16px;"></div>
       </div>
 
       <div style="padding:18px 30px 0;">
-        <div style="border:1px solid #E4DFD1;border-radius:12px;padding:14px 18px;display:flex;gap:32px;background:#FAF8F3;">
+        <div style="border:1px solid #E4DFD1;border-radius:12px;padding:14px 18px;display:flex;flex-direction:column;gap:10px;background:#FAF8F3;">
           <div style="display:flex;align-items:center;gap:10px;">
             <span style="font-size:18px;">👤</span>
             <div><div style="font-size:11px;color:#6E7A73;">${inv.type==='sell'?'العميل':'المورد'}</div><div style="font-size:14px;font-weight:800;">${esc(inv.partyName)}</div></div>
@@ -751,9 +751,9 @@ function buildInvoiceHTML(inv){
       </div>
 
       <div style="margin-top:22px;background:#0F5C4F;color:#fff;padding:14px 30px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
-        <div style="font-size:11px;font-weight:700;">شرم الشيخ - حي النور - أمام كنيسة السمائيين</div>
-        <div style="font-weight:900;font-family:'Tajawal',sans-serif;font-size:13px;letter-spacing:0.5px;">FARFETCH.EG</div>
         <div style="font-size:11px;font-weight:700;direction:ltr;">📞 01065606550 · 01282072557</div>
+        <div style="font-weight:900;font-family:'Tajawal',sans-serif;font-size:13px;letter-spacing:0.5px;">FARFETCH.EG</div>
+        <div style="font-size:11px;font-weight:700;">شرم الشيخ - حي النور - أمام كنيسة السمائيين</div>
       </div>
     </div>`;
 }
