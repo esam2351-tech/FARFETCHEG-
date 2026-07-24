@@ -1606,4 +1606,39 @@ function render(){
   if(!document.getElementById('sidebar')){ renderApp(); return; }
   renderNav();
   const titleMap = {dashboard:'الرئيسية', inventory:'المخزون', audit:'الجرد', invoices:'الفواتير', parties:'العملاء والموردين', collections:'التحصيلات والآجل', expenses:'المصروفات', reports:'التقارير', users:'المستخدمين'};
-  document.getElementById('pageTitle').
+  document.getElementById('pageTitle').textContent = titleMap[state.view] || '';
+  const content = document.getElementById('content');
+  const allowed = navItemsFor().map(n=>n.key);
+  if(!allowed.includes(state.view)) state.view = 'dashboard';
+  if(state.view==='dashboard'){ content.innerHTML = renderDashboard(); }
+  else if(state.view==='inventory'){ content.innerHTML = renderInventory(); bindInventory(); }
+  else if(state.view==='audit'){ content.innerHTML = renderAudit(); bindAudit(); }
+  else if(state.view==='invoices'){ content.innerHTML = renderInvoices(); bindInvoices(); }
+  else if(state.view==='parties'){ content.innerHTML = renderParties(); bindParties(); }
+  else if(state.view==='collections'){ content.innerHTML = renderCollections(); bindCollections(); }
+  else if(state.view==='expenses'){ content.innerHTML = renderExpenses(); bindExpenses(); }
+  else if(state.view==='reports'){ content.innerHTML = renderReports(); bindReports(); }
+  else if(state.view==='users'){ content.innerHTML = renderUsers(); bindUsers(); }
+}
+function renderPOSFullScreen(){
+  const root = document.getElementById('root');
+  root.className = '';
+  root.innerHTML = `
+    <div style="min-height:100vh;display:flex;flex-direction:column;background:var(--paper);">
+      <div style="background:var(--primaryDark);color:#fff;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="width:32px;height:32px;border-radius:8px;background:var(--gold);display:flex;align-items:center;justify-content:center;font-weight:900;font-family:'Tajawal',sans-serif;color:var(--primaryDark);">F</div>
+          <div style="font-family:'Tajawal',sans-serif;font-weight:800;font-size:15px;">نقطة البيع</div>
+        </div>
+        <div style="font-size:12px;opacity:0.85;">${esc(currentUser.name)} · ${fmtDate(todayStr())}</div>
+        <button id="posExitBtn" style="background:rgba(255,255,255,0.15);border:none;color:#fff;padding:8px 16px;border-radius:8px;font-weight:700;cursor:pointer;font-family:'Cairo',sans-serif;">✕ خروج</button>
+      </div>
+      <div style="flex:1;overflow-y:auto;padding:16px;" id="posContent"></div>
+    </div>`;
+  document.getElementById('posContent').innerHTML = renderPOS();
+  bindPOS();
+  document.getElementById('posExitBtn').addEventListener('click', ()=>{ state.view='dashboard'; renderApp(); });
+}
+</script>
+</body>
+</html>
