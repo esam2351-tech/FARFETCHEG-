@@ -126,12 +126,15 @@
   .preview-header{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--line);flex-shrink:0;}
   .preview-header h3{font-family:'Tajawal',sans-serif;font-size:16px;margin:0;font-weight:700;}
   .preview-scroll{flex:1;overflow:auto;background:#EFEBE0;padding:24px 16px;}
-  .preview-zoom-wrap{transform-origin:top center;transition:transform .12s ease;width:fit-content;margin:0 auto;}
+  .preview-zoom-wrap{width:fit-content;margin:0 auto;}
   .preview-zoom-controls{display:flex;align-items:center;justify-content:center;gap:14px;padding:8px;border-top:1px solid var(--line);flex-shrink:0;background:var(--surface);}
   .preview-zoom-controls button{width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:var(--paper);font-size:17px;font-weight:700;cursor:pointer;color:var(--primary);}
   .preview-zoom-controls span{font-size:12px;color:var(--muted);min-width:44px;text-align:center;}
   .preview-actions{display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--line);background:var(--surface);flex-wrap:wrap;flex-shrink:0;}
   .preview-actions .btn{flex:1;justify-content:center;min-width:100px;}
+  .pos-grid{display:grid;grid-template-columns:1fr;gap:16px;}
+  @media (min-width:900px){ .pos-grid{grid-template-columns:2fr 1fr;} }
+  .pos-item:active{transform:scale(0.97);}
 </style>
 </head>
 <body>
@@ -179,9 +182,9 @@ if('serviceWorker' in navigator){
   window.addEventListener('load', ()=>{ navigator.serviceWorker.register('./sw.js').catch(()=>{}); });
 }
 
-const KEYS = {items:'biz_items', parties:'biz_parties', invoices:'biz_invoices', payments:'biz_payments', adjustments:'biz_adjustments', users:'biz_users'};
+const KEYS = {items:'biz_items', parties:'biz_parties', invoices:'biz_invoices', payments:'biz_payments', adjustments:'biz_adjustments', users:'biz_users', expenses:'biz_expenses'};
 
-let state = { items:[], parties:[], invoices:[], payments:[], adjustments:[], users:[], view:'dashboard' };
+let state = { items:[], parties:[], invoices:[], payments:[], adjustments:[], users:[], expenses:[], view:'dashboard' };
 let currentUser = null; // {id,name,role}
 
 async function persist(part){ await saveShared(KEYS[part], state[part]); }
@@ -268,16 +271,17 @@ const root = document.getElementById('root');
 
 /* ================= Boot ================= */
 (async function boot(){
-  const [items, parties, invoices, payments, adjustments, users] = await Promise.all([
+  const [items, parties, invoices, payments, adjustments, users, expenses] = await Promise.all([
     loadShared(KEYS.items, []),
     loadShared(KEYS.parties, []),
     loadShared(KEYS.invoices, []),
     loadShared(KEYS.payments, []),
     loadShared(KEYS.adjustments, []),
     loadShared(KEYS.users, []),
+    loadShared(KEYS.expenses, []),
   ]);
   state.items=items; state.parties=parties; state.invoices=invoices;
-  state.payments=payments; state.adjustments=adjustments; state.users=users;
+  state.payments=payments; state.adjustments=adjustments; state.users=users; state.expenses=expenses;
   attachLiveSync();
   const savedSession = loadPersonal('farfetch_session', null);
   if(savedSession){
@@ -351,11 +355,14 @@ function renderSetupAdmin(){
 function navItemsFor(){
   const all = [
     {key:'dashboard', label:'الرئيسية', ic:'🏠', roles:['admin','rep']},
+    {key:'pos', label:'نقطة البيع', ic:'🛒', roles:['admin','rep']},
     {key:'inventory', label:'المخزون', ic:'📦', roles:['admin']},
     {key:'audit', label:'الجرد', ic:'🧮', roles:['admin']},
     {key:'invoices', label:'الفواتير', ic:'🧾', roles:['admin','rep']},
     {key:'parties', label:'العملاء والموردين', ic:'👥', roles:['admin','rep']},
     {key:'collections', label:'التحصيلات والآجل', ic:'💰', roles:['admin','rep']},
+    {key:'expenses', label:'المصروفات', ic:'💸', roles:['admin']},
+    {key:'reports', label:'التقارير', ic:'📊', roles:['admin']},
     {key:'users', label:'المستخدمين', ic:'🔑', roles:['admin']},
   ];
   return all.filter(n => n.roles.includes(currentUser.role));
@@ -414,6 +421,141 @@ function openModal(html){ const wrap=document.createElement('div'); wrap.classNa
 function closeModal(el){ el.remove(); modalStack = modalStack.filter(m=>m!==el); }
 
 /* ---------------- Dashboard ---------------- */
+/* ---------------- POS: quick sale screen ---------------- */
+function renderPOS(){
+  const filtered = state.items.filter(i=>i.name.includes(posSearch));
+  const cartTotal = posCart.reduce((s,l)=>s+l.qty*l.price,0);
+  const totalQty = posCart.reduce((s,l)=>s+l.qty,0);
+  const finalTotal = Math.max(cartTotal - (+posDiscount||0), 0);
+  const customerOptions = state.parties.filter(p=>p.type==='customer');
+  return `
+  <div class="pos-grid">
+    <div>
+      <div class="search-wrap" style="max-width:100%;margin-bottom:14px;">
+        <span class="search-icon">🔎</span>
+        <input id="posSearch" placeholder="ابحث بالاسم... (F3)" value="${esc(posSearch)}">
+      </div>
+      ${filtered.length===0 ? `<div class="empty"><div class="circle">🛒</div><p>لا توجد أصناف مطابقة.</p></div>` : `
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px;">
+        ${filtered.map(i=>`
+        <div class="card pos-item" data-additem="${i.id}" style="cursor:pointer;text-align:center;padding:12px 8px;">
+          <div style="width:100%;aspect-ratio:1;background:var(--primarySoft);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:28px;margin-bottom:8px;">👕</div>
+          <div style="font-weight:700;font-size:13px;">${esc(i.name)}</div>
+          <div style="color:var(--primary);font-weight:700;font-size:13px;">${money(i.sellPrice)}</div>
+          <div class="muted" style="font-size:10px;">متوفر: ${i.qty}</div>
+        </div>`).join('')}
+      </div>`}
+    </div>
+    <div class="card" style="padding:14px;height:fit-content;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+        <h3 class="section-title" style="margin:0;">🛒 السلة</h3>
+        <span class="badge admin">${posCart.length}</span>
+      </div>
+      <div style="max-height:260px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;">
+      ${posCart.length===0 ? `<p class="muted" style="font-size:13px;">السلة فاضية. دوس على أي صنف عشان تضيفه.</p>` : posCart.map((l,idx)=>{
+        const item = state.items.find(i=>i.id===l.itemId);
+        return `<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;border-bottom:1px dashed var(--line);padding-bottom:8px;">
+          <button class="icon-btn del" data-rmline="${idx}" style="flex-shrink:0;">🗑️</button>
+          <div style="flex:1;min-width:0;">
+            <div style="font-weight:700;font-size:13px;">${esc(item?item.name:'')}</div>
+            <div style="display:flex;align-items:center;gap:6px;margin-top:4px;">
+              <button class="icon-btn edit" data-qdec="${idx}" style="padding:3px 9px;">−</button>
+              <span style="font-weight:700;">${l.qty}</span>
+              <button class="icon-btn edit" data-qinc="${idx}" style="padding:3px 9px;">+</button>
+            </div>
+          </div>
+          <div style="font-weight:700;color:var(--primary);font-size:13px;">${money(l.qty*l.price)}</div>
+        </div>`;
+      }).join('')}
+      </div>
+      <div style="border-top:1px solid var(--line);margin-top:12px;padding-top:12px;display:flex;flex-direction:column;gap:8px;">
+        <label class="field" style="margin-bottom:2px;"><span class="lbl">العميل</span>
+          <select id="posCustomer"><option value="">عميل نقدي (بدون تسجيل)</option>${customerOptions.map(p=>`<option value="${p.id}" ${p.id===posCustomerId?'selected':''}>${esc(p.name)}</option>`).join('')}</select>
+        </label>
+        <div class="row-line"><span>إجمالي الأصناف</span><b>${posCart.length}</b></div>
+        <div class="row-line"><span>إجمالي الكمية</span><b>${totalQty}</b></div>
+        <div class="row-line"><span>الإجمالي قبل الخصم</span><b id="posSubtotal">${money(cartTotal)}</b></div>
+        <label class="field" style="margin-bottom:2px;"><span class="lbl">الخصم (F4)</span><input id="posDiscount" type="number" value="${posDiscount}"></label>
+        <div style="display:flex;justify-content:space-between;padding:10px 0;border-top:2px solid var(--primary);margin-top:4px;">
+          <span style="font-weight:800;">المبلغ المطلوب</span>
+          <b id="posFinalTotal" style="font-size:18px;color:var(--primary);">${money(finalTotal)}</b>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:2px;">
+          ${['نقدي','بنك','إنستاباي','فيزا/ماستركارد'].map(pm=>`<button class="btn ${posPaymentMethod===pm?'btn-primary':''}" data-paymethod="${esc(pm)}" style="${posPaymentMethod!==pm?'background:var(--primarySoft);color:var(--primary);':''}justify-content:center;font-size:12px;padding:8px;">${pm}</button>`).join('')}
+        </div>
+        <button class="btn btn-gold" id="completeSaleBtn" style="width:100%;justify-content:center;margin-top:10px;font-size:15px;">✓ إتمام البيع (F9)</button>
+      </div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:16px;display:flex;gap:14px;flex-wrap:wrap;justify-content:center;">
+    <span class="muted" style="font-size:11px;">F2 عميل</span>
+    <span class="muted" style="font-size:11px;">F3 بحث</span>
+    <span class="muted" style="font-size:11px;">F4 خصم</span>
+    <span class="muted" style="font-size:11px;">F7 مسح السلة</span>
+    <span class="muted" style="font-size:11px;">F9 إتمام البيع</span>
+  </div>`;
+}
+function updatePosTotals(){
+  const cartTotal = posCart.reduce((s,l)=>s+l.qty*l.price,0);
+  const finalTotal = Math.max(cartTotal - (+posDiscount||0), 0);
+  const totalEl = document.getElementById('posFinalTotal');
+  if(totalEl) totalEl.textContent = money(finalTotal);
+}
+async function completeSale(){
+  if(state.view!=='pos' || posCart.length===0) return;
+  const cartTotal = posCart.reduce((s,l)=>s+l.qty*l.price,0);
+  const finalTotal = Math.max(cartTotal - (+posDiscount||0), 0);
+  const party = posCustomerId ? state.parties.find(p=>p.id===posCustomerId) : null;
+  const previousBalance = party ? (party.balance||0) : 0;
+  const inv = {
+    id: uid(), invoiceNumber: 'INV-'+String(state.invoices.length+1).padStart(6,'0'),
+    type:'sell', partyId: posCustomerId||null, partyName: party?party.name:'عميل نقدي',
+    date: todayStr(),
+    lines: posCart.map(l=>({itemId:l.itemId, qty:l.qty, price:l.price, itemName: state.items.find(i=>i.id===l.itemId)?.name||'', cost: state.items.find(i=>i.id===l.itemId)?.buyPrice||0})),
+    total: finalTotal, paid: finalTotal, due: 0, previousBalance,
+    createdBy: currentUser.name, createdById: currentUser.id, paymentMethod: posPaymentMethod,
+  };
+  inv.lines.forEach(l=>{ state.items = state.items.map(it=>it.id===l.itemId?{...it, qty: it.qty - l.qty}:it); });
+  state.invoices.push(inv);
+  await persist('items'); await persist('invoices');
+  posCart = []; posDiscount = 0; posCustomerId=''; posSearch='';
+  render();
+  showToast('تم إتمام البيع بنجاح ✅');
+}
+function bindPOS(){
+  const s = document.getElementById('posSearch');
+  if(s) s.addEventListener('input', e=>{ posSearch=e.target.value; render(); });
+  document.querySelectorAll('[data-additem]').forEach(el=>el.addEventListener('click', ()=>{
+    const item = state.items.find(i=>i.id===el.dataset.additem);
+    if(!item) return;
+    const existing = posCart.find(l=>l.itemId===item.id);
+    if(existing) existing.qty += 1;
+    else posCart.push({itemId:item.id, qty:1, price:item.sellPrice});
+    render();
+  }));
+  document.querySelectorAll('[data-qinc]').forEach(el=>el.addEventListener('click', ()=>{ posCart[+el.dataset.qinc].qty += 1; render(); }));
+  document.querySelectorAll('[data-qdec]').forEach(el=>el.addEventListener('click', ()=>{
+    const idx = +el.dataset.qdec; posCart[idx].qty -= 1; if(posCart[idx].qty<=0) posCart.splice(idx,1); render();
+  }));
+  document.querySelectorAll('[data-rmline]').forEach(el=>el.addEventListener('click', ()=>{ posCart.splice(+el.dataset.rmline,1); render(); }));
+  const custSel = document.getElementById('posCustomer');
+  if(custSel) custSel.addEventListener('change', e=>{ posCustomerId = e.target.value; });
+  const discInput = document.getElementById('posDiscount');
+  if(discInput) discInput.addEventListener('input', e=>{ posDiscount = +e.target.value||0; updatePosTotals(); });
+  document.querySelectorAll('[data-paymethod]').forEach(b=>b.addEventListener('click', ()=>{ posPaymentMethod = b.dataset.paymethod; render(); }));
+  const completeBtn = document.getElementById('completeSaleBtn');
+  if(completeBtn) completeBtn.addEventListener('click', completeSale);
+}
+function posKeyHandler(e){
+  if(state.view!=='pos') return;
+  if(e.key==='F2'){ e.preventDefault(); document.getElementById('posCustomer')?.focus(); }
+  else if(e.key==='F3'){ e.preventDefault(); document.getElementById('posSearch')?.focus(); }
+  else if(e.key==='F4'){ e.preventDefault(); document.getElementById('posDiscount')?.focus(); }
+  else if(e.key==='F7'){ e.preventDefault(); posCart=[]; render(); }
+  else if(e.key==='F9'){ e.preventDefault(); completeSale(); }
+}
+document.addEventListener('keydown', posKeyHandler);
+
 function renderDashboard(){
   if(!isAdmin()){
     const myInvoices = state.invoices.filter(v => v.createdById === currentUser.id || (!v.createdById && v.createdBy === currentUser.name));
@@ -562,6 +704,11 @@ function bindInventory(){
 
 /* ---------------- Stock Audit (الجرد) - admin only ---------------- */
 let auditDraft = {};
+let posCart = [];
+let posCustomerId = '';
+let posDiscount = 0;
+let posSearch = '';
+let posPaymentMethod = 'نقدي';
 let auditQuery = '';
 function ensureAuditDraft(){ state.items.forEach(i=>{ if(!(i.id in auditDraft)) auditDraft[i.id] = i.qty; }); }
 function renderAudit(){
@@ -839,10 +986,13 @@ function previewInvoice(inv){
       <button class="btn" id="previewReceiptBtn" style="background:var(--goldSoft);color:var(--gold);">🧾 إيصال كاشير</button>
     </div>`;
   document.body.appendChild(overlay);
-  let zoom = 1;
   const zoomWrap = overlay.querySelector('#previewZoomWrap');
+  const scrollEl = overlay.querySelector('#previewScroll');
   const label = overlay.querySelector('#zoomLevelLabel');
-  function applyZoom(){ zoomWrap.style.transform = `scale(${zoom})`; label.textContent = Math.round(zoom*100)+'%'; }
+  const availableWidth = scrollEl.clientWidth - 32;
+  let zoom = Math.min(1, Math.max(0.3, availableWidth / 720));
+  function applyZoom(){ zoomWrap.style.zoom = zoom; label.textContent = Math.round(zoom*100)+'%'; }
+  applyZoom();
   overlay.querySelector('#zoomIn').addEventListener('click', ()=>{ zoom = Math.min(zoom+0.15, 2.5); applyZoom(); });
   overlay.querySelector('#zoomOut').addEventListener('click', ()=>{ zoom = Math.max(zoom-0.15, 0.4); applyZoom(); });
   overlay.querySelector('#closePreview').addEventListener('click', ()=>overlay.remove());
@@ -965,7 +1115,7 @@ function invoiceModal(type, existingInv){
     const party = state.parties.find(p=>p.id===partyId);
     const previousBalance = party ? (party.balance||0) : 0;
     const inv = { id: isEdit?existingInv.id:uid(), invoiceNumber: isEdit?existingInv.invoiceNumber:('INV-'+String(state.invoices.length+1).padStart(6,'0')), type, partyId, partyName: party?party.name:'', date: modal.querySelector('#inv_date').value || todayStr(),
-      lines: lines.map(l=>({...l, itemName: state.items.find(i=>i.id===l.itemId)?.name || ''})), total, paid, due, previousBalance,
+      lines: lines.map(l=>({...l, itemName: state.items.find(i=>i.id===l.itemId)?.name || '', cost: state.items.find(i=>i.id===l.itemId)?.buyPrice || 0})), total, paid, due, previousBalance,
       createdBy: isEdit?existingInv.createdBy:currentUser.name, createdById: isEdit?existingInv.createdById:currentUser.id };
     if(isEdit) inv.editedBy = currentUser.name;
     inv.lines.forEach(l=>{ state.items = state.items.map(it => it.id===l.itemId ? {...it, qty: it.qty + (type==='buy'? l.qty : -l.qty)} : it); });
@@ -1103,6 +1253,151 @@ function bindCollections(){
   document.querySelectorAll('[data-collect]').forEach(b=>b.addEventListener('click', ()=>{ collectModal(state.parties.find(p=>p.id===b.dataset.collect)); }));
 }
 
+/* ---------------- Expenses (admin only) ---------------- */
+const EXPENSE_CATEGORIES = ["إيجار","كهرباء ومياه","رواتب","نقل وشحن","صيانة","أخرى"];
+function renderExpenses(){
+  const list = [...state.expenses].sort((a,b)=> a.date<b.date?1:-1);
+  const total = list.reduce((s,e)=>s+e.amount,0);
+  return `
+  <div class="toolbar">
+    <div class="card" style="padding:12px 18px;">
+      <span class="muted" style="font-size:12px;">إجمالي المصروفات المسجلة</span>
+      <div style="font-weight:800;font-size:18px;color:var(--brick);">${money(total)}</div>
+    </div>
+    <button class="btn btn-primary" id="addExpenseBtn">+ إضافة مصروف</button>
+  </div>
+  ${list.length===0 ? `<div class="empty"><div class="circle">💸</div><p>لا توجد مصروفات مسجلة بعد.</p></div>` : `
+  <div class="card" style="padding:0;">
+    <div class="table-wrap"><table>
+      <thead><tr><th>التاريخ</th><th>البند</th><th>ملاحظات</th><th>المبلغ</th><th></th></tr></thead>
+      <tbody>
+      ${list.map(e=>`<tr>
+        <td class="muted">${fmtDate(e.date)}</td>
+        <td style="font-weight:600;">${esc(e.category)}</td>
+        <td class="muted">${esc(e.note||'—')}</td>
+        <td style="font-weight:700;color:var(--brick);">${money(e.amount)}</td>
+        <td><button class="icon-btn del" data-edel="${e.id}">🗑️</button></td>
+      </tr>`).join('')}
+      </tbody>
+    </table></div>
+  </div>`}`;
+}
+function expenseModal(){
+  const html = `
+  <div class="modal">
+    <div class="modal-head"><h3>إضافة مصروف</h3><button class="x-btn" data-close>✕</button></div>
+    <div class="modal-body">
+      <label class="field"><span class="lbl">البند</span><select id="e_cat">${EXPENSE_CATEGORIES.map(c=>`<option>${c}</option>`).join('')}</select></label>
+      <label class="field"><span class="lbl">المبلغ</span><input id="e_amount" type="number"></label>
+      <label class="field"><span class="lbl">التاريخ</span><input id="e_date" type="date" value="${todayStr()}"></label>
+      <label class="field"><span class="lbl">ملاحظات (اختياري)</span><input id="e_note"></label>
+      <button class="btn btn-primary" id="saveExpenseBtn" style="width:100%;justify-content:center;margin-top:6px;">حفظ</button>
+    </div>
+  </div>`;
+  const modal = openModal(html);
+  modal.querySelector('[data-close]').addEventListener('click', ()=>closeModal(modal));
+  modal.querySelector('#saveExpenseBtn').addEventListener('click', async ()=>{
+    const amount = +modal.querySelector('#e_amount').value;
+    if(!amount || amount<=0) return;
+    state.expenses.push({id:uid(), category:modal.querySelector('#e_cat').value, amount, date:modal.querySelector('#e_date').value||todayStr(), note:modal.querySelector('#e_note').value, by:currentUser.name});
+    await persist('expenses');
+    closeModal(modal); render();
+  });
+}
+function bindExpenses(){
+  const addBtn = document.getElementById('addExpenseBtn');
+  if(addBtn) addBtn.addEventListener('click', expenseModal);
+  document.querySelectorAll('[data-edel]').forEach(b=>b.addEventListener('click', async ()=>{
+    state.expenses = state.expenses.filter(e=>e.id!==b.dataset.edel); await persist('expenses'); render();
+  }));
+}
+
+/* ---------------- Reports (admin only): sales by period, profit & loss, best sellers ---------------- */
+let reportsPreset = 'month';
+let reportsFrom = null, reportsTo = null;
+function reportsRange(){
+  const today = new Date(todayStr());
+  let from, to;
+  if(reportsPreset==='today'){ from = todayStr(); to = todayStr(); }
+  else if(reportsPreset==='week'){ const d=new Date(today); d.setDate(d.getDate()-6); from=d.toISOString().slice(0,10); to=todayStr(); }
+  else if(reportsPreset==='month'){ const d=new Date(today.getFullYear(), today.getMonth(), 1); from=d.toISOString().slice(0,10); to=todayStr(); }
+  else if(reportsPreset==='all'){ from='0000-01-01'; to='9999-12-31'; }
+  else { from = reportsFrom||'0000-01-01'; to = reportsTo||'9999-12-31'; }
+  return {from, to};
+}
+function renderReports(){
+  const {from, to} = reportsRange();
+  const sellInvoices = state.invoices.filter(v=>v.type==='sell' && v.date>=from && v.date<=to);
+  const expensesInRange = state.expenses.filter(e=>e.date>=from && e.date<=to);
+
+  const revenue = sellInvoices.reduce((s,v)=>s+v.total,0);
+  const cogs = sellInvoices.reduce((s,v)=> s + v.lines.reduce((s2,l)=>{
+    const cost = (l.cost!==undefined) ? l.cost : (state.items.find(i=>i.id===l.itemId)?.buyPrice||0);
+    return s2 + cost*l.qty;
+  },0), 0);
+  const grossProfit = revenue - cogs;
+  const totalExpenses = expensesInRange.reduce((s,e)=>s+e.amount,0);
+  const netProfit = grossProfit - totalExpenses;
+
+  const bestMap = {};
+  sellInvoices.forEach(v=>v.lines.forEach(l=>{
+    if(!bestMap[l.itemName]) bestMap[l.itemName] = {name:l.itemName, qty:0, revenue:0};
+    bestMap[l.itemName].qty += (+l.qty||0);
+    bestMap[l.itemName].revenue += l.qty*l.price;
+  }));
+  const bestSellers = Object.values(bestMap).sort((a,b)=>b.qty-a.qty).slice(0,10);
+
+  const presets = [['today','اليوم'],['week','آخر أسبوع'],['month','هذا الشهر'],['all','كل الفترات'],['custom','مخصص']];
+
+  return `
+  <div class="toolbar" style="flex-wrap:wrap;">
+    <div class="tabs" style="flex-wrap:wrap;">
+      ${presets.map(([k,label])=>`<button class="tab-btn ${reportsPreset===k?'active':''}" data-preset="${k}">${label}</button>`).join('')}
+    </div>
+  </div>
+  ${reportsPreset==='custom' ? `
+  <div class="card" style="margin-bottom:16px;">
+    <div class="grid2">
+      <label class="field"><span class="lbl">من تاريخ</span><input id="rep_from" type="date" value="${reportsFrom||''}"></label>
+      <label class="field"><span class="lbl">إلى تاريخ</span><input id="rep_to" type="date" value="${reportsTo||''}"></label>
+    </div>
+    <button class="btn btn-primary" id="applyRangeBtn" style="width:100%;justify-content:center;">تطبيق</button>
+  </div>` : ``}
+
+  <div class="grid-stats">
+    <div class="card"><div class="stat-top"><span class="stat-label">المبيعات</span><div class="stat-icon" style="background:#0F5C4F22;color:#0F5C4F;">🧾</div></div><div class="stat-value">${money(revenue)}</div><div class="stat-sub">${sellInvoices.length} فاتورة</div></div>
+    <div class="card"><div class="stat-top"><span class="stat-label">تكلفة البضاعة المباعة</span><div class="stat-icon" style="background:#A8462E22;color:#A8462E;">📦</div></div><div class="stat-value">${money(cogs)}</div></div>
+    <div class="card"><div class="stat-top"><span class="stat-label">مجمل الربح</span><div class="stat-icon" style="background:#C79A2E22;color:#C79A2E;">📈</div></div><div class="stat-value">${money(grossProfit)}</div></div>
+    <div class="card"><div class="stat-top"><span class="stat-label">المصروفات</span><div class="stat-icon" style="background:#A8462E22;color:#A8462E;">💸</div></div><div class="stat-value">${money(totalExpenses)}</div></div>
+  </div>
+
+  <div class="card" style="margin-top:16px;">
+    <h3 class="section-title">💰 صافي الربح</h3>
+    <div style="font-size:26px;font-weight:800;color:${netProfit>=0?'var(--primary)':'var(--brick)'};">${money(netProfit)}</div>
+    <p class="muted" style="font-size:12px;margin-top:6px;">= مجمل الربح (${money(grossProfit)}) − المصروفات (${money(totalExpenses)})</p>
+  </div>
+
+  <div class="card" style="margin-top:18px;">
+    <h3 class="section-title">🏆 أكتر الأصناف مبيعًا</h3>
+    ${bestSellers.length===0 ? `<p class="muted" style="font-size:14px;">لا توجد مبيعات في الفترة دي.</p>` : `
+    <div class="table-wrap"><table>
+      <thead><tr><th>الصنف</th><th>الكمية المباعة</th><th>الإيراد</th></tr></thead>
+      <tbody>
+      ${bestSellers.map(b=>`<tr><td style="font-weight:600;">${esc(b.name)}</td><td class="muted">${b.qty}</td><td style="font-weight:700;color:var(--primary);">${money(b.revenue)}</td></tr>`).join('')}
+      </tbody>
+    </table></div>`}
+  </div>`;
+}
+function bindReports(){
+  document.querySelectorAll('[data-preset]').forEach(b=>b.addEventListener('click', ()=>{ reportsPreset = b.dataset.preset; render(); }));
+  const applyBtn = document.getElementById('applyRangeBtn');
+  if(applyBtn) applyBtn.addEventListener('click', ()=>{
+    reportsFrom = document.getElementById('rep_from').value;
+    reportsTo = document.getElementById('rep_to').value;
+    render();
+  });
+}
+
 /* ---------------- Users management (admin only) ---------------- */
 function renderUsers(){
   return `
@@ -1167,8 +1462,15 @@ function bindUsers(){
 
 /* ================= Router ================= */
 function render(){
+  if(state.view==='pos'){
+    const posContent = document.getElementById('posContent');
+    if(posContent){ posContent.innerHTML = renderPOS(); bindPOS(); }
+    else{ renderPOSFullScreen(); }
+    return;
+  }
+  if(!document.getElementById('sidebar')){ renderApp(); return; }
   renderNav();
-  const titleMap = {dashboard:'الرئيسية', inventory:'المخزون', audit:'الجرد', invoices:'الفواتير', parties:'العملاء والموردين', collections:'التحصيلات والآجل', users:'المستخدمين'};
+  const titleMap = {dashboard:'الرئيسية', inventory:'المخزون', audit:'الجرد', invoices:'الفواتير', parties:'العملاء والموردين', collections:'التحصيلات والآجل', expenses:'المصروفات', reports:'التقارير', users:'المستخدمين'};
   document.getElementById('pageTitle').textContent = titleMap[state.view] || '';
   const content = document.getElementById('content');
   const allowed = navItemsFor().map(n=>n.key);
@@ -1179,7 +1481,28 @@ function render(){
   else if(state.view==='invoices'){ content.innerHTML = renderInvoices(); bindInvoices(); }
   else if(state.view==='parties'){ content.innerHTML = renderParties(); bindParties(); }
   else if(state.view==='collections'){ content.innerHTML = renderCollections(); bindCollections(); }
+  else if(state.view==='expenses'){ content.innerHTML = renderExpenses(); bindExpenses(); }
+  else if(state.view==='reports'){ content.innerHTML = renderReports(); bindReports(); }
   else if(state.view==='users'){ content.innerHTML = renderUsers(); bindUsers(); }
+}
+function renderPOSFullScreen(){
+  const root = document.getElementById('root');
+  root.className = '';
+  root.innerHTML = `
+    <div style="min-height:100vh;display:flex;flex-direction:column;background:var(--paper);">
+      <div style="background:var(--primaryDark);color:#fff;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="width:32px;height:32px;border-radius:8px;background:var(--gold);display:flex;align-items:center;justify-content:center;font-weight:900;font-family:'Tajawal',sans-serif;color:var(--primaryDark);">F</div>
+          <div style="font-family:'Tajawal',sans-serif;font-weight:800;font-size:15px;">نقطة البيع</div>
+        </div>
+        <div style="font-size:12px;opacity:0.85;">${esc(currentUser.name)} · ${fmtDate(todayStr())}</div>
+        <button id="posExitBtn" style="background:rgba(255,255,255,0.15);border:none;color:#fff;padding:8px 16px;border-radius:8px;font-weight:700;cursor:pointer;font-family:'Cairo',sans-serif;">✕ خروج</button>
+      </div>
+      <div style="flex:1;overflow-y:auto;padding:16px;" id="posContent"></div>
+    </div>`;
+  document.getElementById('posContent').innerHTML = renderPOS();
+  bindPOS();
+  document.getElementById('posExitBtn').addEventListener('click', ()=>{ state.view='dashboard'; renderApp(); });
 }
 </script>
 </body>
