@@ -442,6 +442,8 @@ function renderPOS(){
   const cartTotal = posCart.reduce((s,l)=>s+l.qty*l.price,0);
   const totalQty = posCart.reduce((s,l)=>s+l.qty,0);
   const finalTotal = Math.max(cartTotal - (+posDiscount||0), 0);
+  const payNow = posCustomerId ? Math.min(posPaidAmount===null ? finalTotal : posPaidAmount, finalTotal) : finalTotal;
+  const due = Math.max(finalTotal - payNow, 0);
   const customerOptions = state.parties.filter(p=>p.type==='customer');
   return `
   <div class="pos-grid">
@@ -455,7 +457,7 @@ function renderPOS(){
       </div>
       ${categories.length>1 ? `<div class="tabs" style="flex-wrap:wrap;margin-bottom:14px;">${categories.map(c=>`<button class="tab-btn ${posCategory===c?'active':''}" data-poscat="${esc(c)}">${esc(c)}${posCategory===c?' ✓':''}</button>`).join('')}</div>` : ''}
       ${filtered.length===0 ? `<div class="empty"><div class="circle">🛒</div><p>لا توجد أصناف مطابقة.</p></div>` : `
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px;">
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:10px;">
         ${filtered.map(i=>`
         <div class="card pos-item" data-additem="${i.id}" style="cursor:pointer;text-align:center;padding:12px 8px;">
           <div style="position:relative;width:100%;aspect-ratio:1;background:var(--primarySoft);border-radius:10px;overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:28px;margin-bottom:8px;">
@@ -479,13 +481,14 @@ function renderPOS(){
           <button class="icon-btn del" data-rmline="${idx}" style="flex-shrink:0;">🗑️</button>
           <div style="flex:1;min-width:0;">
             <div style="font-weight:700;font-size:13px;">${esc(item?item.name:'')}</div>
-            <div style="display:flex;align-items:center;gap:6px;margin-top:4px;">
+            <div style="display:flex;align-items:center;gap:6px;margin-top:4px;flex-wrap:wrap;">
               <button class="icon-btn edit" data-qdec="${idx}" style="padding:3px 9px;">−</button>
               <span style="font-weight:700;">${l.qty}</span>
               <button class="icon-btn edit" data-qinc="${idx}" style="padding:3px 9px;">+</button>
+              <input type="number" class="cart-price-input" data-priceidx="${idx}" value="${l.price}" style="width:64px;padding:4px 6px;font-size:12px;">
             </div>
           </div>
-          <div style="font-weight:700;color:var(--primary);font-size:13px;">${money(l.qty*l.price)}</div>
+          <div id="cartLineTotal-${idx}" style="font-weight:700;color:var(--primary);font-size:13px;">${money(l.qty*l.price)}</div>
         </div>`;
       }).join('')}
       </div>
@@ -501,6 +504,11 @@ function renderPOS(){
           <span style="font-weight:800;">المبلغ المطلوب</span>
           <b id="posFinalTotal" style="font-size:18px;color:var(--primary);">${money(finalTotal)}</b>
         </div>
+        <label class="field" style="margin-bottom:2px;">
+          <span class="lbl">المدفوع الآن${!posCustomerId?' (البيع النقدي لازم يتدفع بالكامل)':''}</span>
+          <input id="posPaid" type="number" value="${payNow}" ${!posCustomerId?'disabled':''}>
+        </label>
+        ${due>0 ? `<div class="row-line" style="color:var(--brick);"><span>متبقي (آجل)</span><b id="posDueDisplay">${money(due)}</b></div>` : ``}
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:2px;">
           ${['نقدي','بنك','إنستاباي','فيزا/ماستركارد'].map(pm=>`<button class="btn ${posPaymentMethod===pm?'btn-primary':''}" data-paymethod="${esc(pm)}" style="${posPaymentMethod!==pm?'background:var(--primarySoft);color:var(--primary);':''}justify-content:center;font-size:12px;padding:8px;">${pm}</button>`).join('')}
         </div>
@@ -521,6 +529,10 @@ function updatePosTotals(){
   const finalTotal = Math.max(cartTotal - (+posDiscount||0), 0);
   const totalEl = document.getElementById('posFinalTotal');
   if(totalEl) totalEl.textContent = money(finalTotal);
+  const payNow = posCustomerId ? Math.min(posPaidAmount===null ? finalTotal : posPaidAmount, finalTotal) : finalTotal;
+  const due = Math.max(finalTotal - payNow, 0);
+  const dueEl = document.getElementById('posDueDisplay');
+  if(dueEl) dueEl.textContent = money(due);
 }
 async function completeSale(){
   if(state.view!=='pos' || posCart.length===0) return;
@@ -528,20 +540,23 @@ async function completeSale(){
   const finalTotal = Math.max(cartTotal - (+posDiscount||0), 0);
   const party = posCustomerId ? state.parties.find(p=>p.id===posCustomerId) : null;
   const previousBalance = party ? (party.balance||0) : 0;
+  const payNow = posCustomerId ? Math.min(posPaidAmount===null ? finalTotal : posPaidAmount, finalTotal) : finalTotal;
+  const due = Math.max(finalTotal - payNow, 0);
   const inv = {
     id: uid(), invoiceNumber: 'INV-'+String(state.invoices.length+1).padStart(6,'0'),
     type:'sell', partyId: posCustomerId||null, partyName: party?party.name:'عميل نقدي',
     date: todayStr(),
     lines: posCart.map(l=>({itemId:l.itemId, qty:l.qty, price:l.price, itemName: state.items.find(i=>i.id===l.itemId)?.name||'', cost: state.items.find(i=>i.id===l.itemId)?.buyPrice||0})),
-    total: finalTotal, paid: finalTotal, due: 0, previousBalance,
+    total: finalTotal, paid: payNow, due, previousBalance,
     createdBy: currentUser.name, createdById: currentUser.id, paymentMethod: posPaymentMethod,
   };
   inv.lines.forEach(l=>{ state.items = state.items.map(it=>it.id===l.itemId?{...it, qty: it.qty - l.qty}:it); });
+  if(party && due>0){ state.parties = state.parties.map(p=>p.id===party.id?{...p, balance:(p.balance||0)+due}:p); }
   state.invoices.push(inv);
-  await persist('items'); await persist('invoices');
-  posCart = []; posDiscount = 0; posCustomerId=''; posSearch='';
+  await persist('items'); await persist('invoices'); if(party && due>0) await persist('parties');
+  posCart = []; posDiscount = 0; posCustomerId=''; posSearch=''; posPaidAmount = null;
   render();
-  showToast('تم إتمام البيع بنجاح ✅');
+  showToast(due>0 ? `تم البيع، متبقي آجل ${money(due)} ✅` : 'تم إتمام البيع بنجاح ✅');
 }
 function bindPOS(){
   const s = document.getElementById('posSearch');
@@ -572,10 +587,21 @@ function bindPOS(){
     const idx = +el.dataset.qdec; posCart[idx].qty -= 1; if(posCart[idx].qty<=0) posCart.splice(idx,1); render();
   }));
   document.querySelectorAll('[data-rmline]').forEach(el=>el.addEventListener('click', ()=>{ posCart.splice(+el.dataset.rmline,1); render(); }));
+  document.querySelectorAll('.cart-price-input').forEach(el=>el.addEventListener('input', e=>{
+    const idx = +el.dataset.priceidx;
+    posCart[idx].price = +e.target.value || 0;
+    const lineTotalEl = document.getElementById('cartLineTotal-'+idx);
+    if(lineTotalEl) lineTotalEl.textContent = money(posCart[idx].qty*posCart[idx].price);
+    const subtotalEl = document.getElementById('posSubtotal');
+    if(subtotalEl) subtotalEl.textContent = money(posCart.reduce((s,l)=>s+l.qty*l.price,0));
+    updatePosTotals();
+  }));
   const custSel = document.getElementById('posCustomer');
-  if(custSel) custSel.addEventListener('change', e=>{ posCustomerId = e.target.value; });
+  if(custSel) custSel.addEventListener('change', e=>{ posCustomerId = e.target.value; posPaidAmount = null; render(); });
   const discInput = document.getElementById('posDiscount');
   if(discInput) discInput.addEventListener('input', e=>{ posDiscount = +e.target.value||0; updatePosTotals(); });
+  const paidInput = document.getElementById('posPaid');
+  if(paidInput) paidInput.addEventListener('input', e=>{ posPaidAmount = +e.target.value||0; updatePosTotals(); });
   document.querySelectorAll('[data-paymethod]').forEach(b=>b.addEventListener('click', ()=>{ posPaymentMethod = b.dataset.paymethod; render(); }));
   const completeBtn = document.getElementById('completeSaleBtn');
   if(completeBtn) completeBtn.addEventListener('click', completeSale);
@@ -844,6 +870,7 @@ let posCustomerId = '';
 let posDiscount = 0;
 let posSearch = '';
 let posPaymentMethod = 'نقدي';
+let posPaidAmount = null;
 let auditQuery = '';
 function ensureAuditDraft(){ state.items.forEach(i=>{ if(!(i.id in auditDraft)) auditDraft[i.id] = i.qty; }); }
 function renderAudit(){
