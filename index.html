@@ -442,7 +442,7 @@ function renderPOS(){
   const cartTotal = posCart.reduce((s,l)=>s+l.qty*l.price,0);
   const totalQty = posCart.reduce((s,l)=>s+l.qty,0);
   const finalTotal = Math.max(cartTotal - (+posDiscount||0), 0);
-  const payNow = posCustomerId ? Math.min(posPaidAmount===null ? finalTotal : posPaidAmount, finalTotal) : finalTotal;
+  const payNow = posCustomerId ? Math.min(posPaidAmount||0, finalTotal) : finalTotal;
   const due = Math.max(finalTotal - payNow, 0);
   const customerOptions = state.parties.filter(p=>p.type==='customer');
   return `
@@ -506,7 +506,7 @@ function renderPOS(){
         </div>
         <label class="field" style="margin-bottom:2px;">
           <span class="lbl">المدفوع الآن${!posCustomerId?' (البيع النقدي لازم يتدفع بالكامل)':''}</span>
-          <input id="posPaid" type="number" value="${payNow}" ${!posCustomerId?'disabled':''}>
+          <input id="posPaid" type="number" value="${!posCustomerId ? finalTotal : (payNow||'')}" placeholder="0" ${!posCustomerId?'disabled':''}>
         </label>
         ${due>0 ? `<div class="row-line" style="color:var(--brick);"><span>متبقي (آجل)</span><b id="posDueDisplay">${money(due)}</b></div>` : ``}
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:2px;">
@@ -529,7 +529,7 @@ function updatePosTotals(){
   const finalTotal = Math.max(cartTotal - (+posDiscount||0), 0);
   const totalEl = document.getElementById('posFinalTotal');
   if(totalEl) totalEl.textContent = money(finalTotal);
-  const payNow = posCustomerId ? Math.min(posPaidAmount===null ? finalTotal : posPaidAmount, finalTotal) : finalTotal;
+  const payNow = posCustomerId ? Math.min(posPaidAmount||0, finalTotal) : finalTotal;
   const due = Math.max(finalTotal - payNow, 0);
   const dueEl = document.getElementById('posDueDisplay');
   if(dueEl) dueEl.textContent = money(due);
@@ -540,7 +540,7 @@ async function completeSale(){
   const finalTotal = Math.max(cartTotal - (+posDiscount||0), 0);
   const party = posCustomerId ? state.parties.find(p=>p.id===posCustomerId) : null;
   const previousBalance = party ? (party.balance||0) : 0;
-  const payNow = posCustomerId ? Math.min(posPaidAmount===null ? finalTotal : posPaidAmount, finalTotal) : finalTotal;
+  const payNow = posCustomerId ? Math.min(posPaidAmount||0, finalTotal) : finalTotal;
   const due = Math.max(finalTotal - payNow, 0);
   const inv = {
     id: uid(), invoiceNumber: 'INV-'+String(state.invoices.length+1).padStart(6,'0'),
@@ -557,6 +557,7 @@ async function completeSale(){
   posCart = []; posDiscount = 0; posCustomerId=''; posSearch=''; posPaidAmount = null;
   render();
   showToast(due>0 ? `تم البيع، متبقي آجل ${money(due)} ✅` : 'تم إتمام البيع بنجاح ✅');
+  previewInvoice(inv);
 }
 function bindPOS(){
   const s = document.getElementById('posSearch');
