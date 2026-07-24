@@ -422,8 +422,10 @@ function closeModal(el){ el.remove(); modalStack = modalStack.filter(m=>m!==el);
 
 /* ---------------- Dashboard ---------------- */
 /* ---------------- POS: quick sale screen ---------------- */
+let posCategory = 'الكل';
 function renderPOS(){
-  const filtered = state.items.filter(i=>i.name.includes(posSearch));
+  const categories = ['الكل', ...new Set(state.items.map(i=>i.category).filter(Boolean))];
+  const filtered = state.items.filter(i=> i.name.includes(posSearch) && (posCategory==='الكل' || i.category===posCategory));
   const cartTotal = posCart.reduce((s,l)=>s+l.qty*l.price,0);
   const totalQty = posCart.reduce((s,l)=>s+l.qty,0);
   const finalTotal = Math.max(cartTotal - (+posDiscount||0), 0);
@@ -431,15 +433,19 @@ function renderPOS(){
   return `
   <div class="pos-grid">
     <div>
-      <div class="search-wrap" style="max-width:100%;margin-bottom:14px;">
-        <span class="search-icon">🔎</span>
-        <input id="posSearch" placeholder="ابحث بالاسم... (F3)" value="${esc(posSearch)}">
+      <div style="display:flex;gap:8px;margin-bottom:14px;">
+        <div class="search-wrap" style="max-width:100%;">
+          <span class="search-icon">🔎</span>
+          <input id="posSearch" placeholder="ابحث بالاسم... (F3)" value="${esc(posSearch)}">
+        </div>
+        <button id="posScanBtn" class="btn btn-primary" style="flex-shrink:0;">📷 مسح</button>
       </div>
+      ${categories.length>1 ? `<div class="tabs" style="flex-wrap:wrap;margin-bottom:14px;">${categories.map(c=>`<button class="tab-btn ${posCategory===c?'active':''}" data-poscat="${esc(c)}">${esc(c)}</button>`).join('')}</div>` : ''}
       ${filtered.length===0 ? `<div class="empty"><div class="circle">🛒</div><p>لا توجد أصناف مطابقة.</p></div>` : `
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px;">
         ${filtered.map(i=>`
         <div class="card pos-item" data-additem="${i.id}" style="cursor:pointer;text-align:center;padding:12px 8px;">
-          <div style="width:100%;aspect-ratio:1;background:var(--primarySoft);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:28px;margin-bottom:8px;">👕</div>
+          <div style="width:100%;aspect-ratio:1;background:var(--primarySoft);border-radius:10px;overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:28px;margin-bottom:8px;">${i.image?`<img src="${i.image}" style="width:100%;height:100%;object-fit:cover;">`:'👕'}</div>
           <div style="font-weight:700;font-size:13px;">${esc(i.name)}</div>
           <div style="color:var(--primary);font-weight:700;font-size:13px;">${money(i.sellPrice)}</div>
           <div class="muted" style="font-size:10px;">متوفر: ${i.qty}</div>
@@ -525,6 +531,19 @@ async function completeSale(){
 function bindPOS(){
   const s = document.getElementById('posSearch');
   if(s) s.addEventListener('input', e=>{ posSearch=e.target.value; render(); });
+  document.querySelectorAll('[data-poscat]').forEach(b=>b.addEventListener('click', ()=>{ posCategory = b.dataset.poscat; render(); }));
+  const scanBtn = document.getElementById('posScanBtn');
+  if(scanBtn) scanBtn.addEventListener('click', ()=>{
+    openBarcodeScanner(code=>{
+      const item = state.items.find(i=>i.barcode && i.barcode===code);
+      if(!item){ showToast('لم يتم العثور على صنف بهذا الباركود'); return; }
+      const existing = posCart.find(l=>l.itemId===item.id);
+      if(existing) existing.qty += 1;
+      else posCart.push({itemId:item.id, qty:1, price:item.sellPrice});
+      render();
+      showToast(`تمت إضافة ${item.name} ✅`);
+    });
+  });
   document.querySelectorAll('[data-additem]').forEach(el=>el.addEventListener('click', ()=>{
     const item = state.items.find(i=>i.id===el.dataset.additem);
     if(!item) return;
@@ -631,20 +650,25 @@ function renderDashboard(){
 
 /* ---------------- Inventory ---------------- */
 let invQuery = '';
+let invCategory = 'الكل';
 function renderInventory(){
-  const filtered = state.items.filter(i=>i.name.includes(invQuery));
+  const categories = ['الكل', ...new Set(state.items.map(i=>i.category).filter(Boolean))];
+  const filtered = state.items.filter(i=> i.name.includes(invQuery) && (invCategory==='الكل' || i.category===invCategory));
   return `
-  <div class="toolbar">
+  <div class="toolbar" style="flex-wrap:wrap;">
     <div class="search-wrap"><span class="search-icon">🔎</span><input id="invSearch" placeholder="بحث عن صنف..." value="${esc(invQuery)}"></div>
     ${isAdmin() ? `<button class="btn btn-primary" id="addItemBtn">+ إضافة صنف</button>` : ''}
   </div>
+  ${categories.length>1 ? `<div class="tabs" style="flex-wrap:wrap;margin-bottom:14px;">${categories.map(c=>`<button class="tab-btn ${invCategory===c?'active':''}" data-cat="${esc(c)}">${esc(c)}</button>`).join('')}</div>` : ''}
   ${filtered.length===0 ? `<div class="empty"><div class="circle">📦</div><p>لا توجد أصناف بعد.</p></div>` : `
   <div class="card" style="padding:0;">
     <div class="table-wrap"><table>
-      <thead><tr><th>الصنف</th><th>الوحدة</th><th>الكمية</th><th>سعر الشراء</th><th>سعر البيع</th><th>القيمة</th>${isAdmin()?'<th></th>':''}</tr></thead>
+      <thead><tr><th></th><th>الصنف</th><th>التصنيف</th><th>الوحدة</th><th>الكمية</th><th>سعر الشراء</th><th>سعر البيع</th><th>القيمة</th>${isAdmin()?'<th></th>':''}</tr></thead>
       <tbody>
       ${filtered.map(i=>`<tr>
+        <td>${i.image ? `<img src="${i.image}" style="width:34px;height:34px;border-radius:8px;object-fit:cover;">` : `<div style="width:34px;height:34px;border-radius:8px;background:var(--primarySoft);display:flex;align-items:center;justify-content:center;">👕</div>`}</td>
         <td style="font-weight:600;">${esc(i.name)}</td>
+        <td class="muted">${esc(i.category||'—')}</td>
         <td class="muted">${esc(i.unit)}</td>
         <td style="font-weight:600;${i.qty<=i.minQty?'color:var(--brick);':''}">${i.qty}</td>
         <td class="muted">${money(i.buyPrice)}</td>
@@ -659,14 +683,92 @@ function renderInventory(){
     </table></div>
   </div>`}`;
 }
+function resizeImageFile(file, maxSize=300, quality=0.7){
+  return new Promise((resolve,reject)=>{
+    const reader = new FileReader();
+    reader.onload = e=>{
+      const img = new Image();
+      img.onload = ()=>{
+        let w=img.width, h=img.height;
+        if(w>h){ if(w>maxSize){ h=Math.round(h*maxSize/w); w=maxSize; } }
+        else{ if(h>maxSize){ w=Math.round(w*maxSize/h); h=maxSize; } }
+        const canvas = document.createElement('canvas');
+        canvas.width=w; canvas.height=h;
+        canvas.getContext('2d').drawImage(img,0,0,w,h);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+async function openBarcodeScanner(onDetect){
+  if(!('BarcodeDetector' in window)){
+    showToast('متصفحك لا يدعم قراءة الباركود بالكاميرا، جرب كروم على أندرويد');
+    return;
+  }
+  const modal = openModal(`
+    <div class="modal">
+      <div class="modal-head"><h3>📷 مسح الباركود</h3><button class="x-btn" data-close>✕</button></div>
+      <div class="modal-body" style="padding:0;">
+        <video id="scanVideo" autoplay playsinline muted style="width:100%;background:#000;display:block;"></video>
+        <p class="muted" style="text-align:center;font-size:12px;padding:10px;">وجّه الكاميرا ناحية الباركود</p>
+      </div>
+    </div>`);
+  let stream, stopped=false, rafId;
+  function stopScan(){
+    stopped = true;
+    if(rafId) cancelAnimationFrame(rafId);
+    if(stream) stream.getTracks().forEach(t=>t.stop());
+  }
+  modal.querySelector('[data-close]').addEventListener('click', ()=>{ stopScan(); closeModal(modal); });
+  const video = modal.querySelector('#scanVideo');
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+    video.srcObject = stream;
+    const detector = new BarcodeDetector({formats:['ean_13','ean_8','code_128','code_39','upc_a','upc_e','qr_code']});
+    async function scanLoop(){
+      if(stopped) return;
+      try{
+        const codes = await detector.detect(video);
+        if(codes.length>0){
+          stopScan();
+          closeModal(modal);
+          onDetect(codes[0].rawValue);
+          return;
+        }
+      }catch(e){}
+      rafId = requestAnimationFrame(scanLoop);
+    }
+    scanLoop();
+  }catch(e){
+    showToast('تعذّر الوصول للكاميرا');
+    stopScan();
+    closeModal(modal);
+  }
+}
 function itemModal(item){
   const isNew = !item;
-  const f = item ? {...item} : {id:uid(), name:'', unit:UNITS[0], qty:0, minQty:5, buyPrice:0, sellPrice:0};
+  const f = item ? {...item} : {id:uid(), name:'', unit:UNITS[0], qty:0, minQty:5, buyPrice:0, sellPrice:0, barcode:'', image:'', category:''};
   const html = `
   <div class="modal">
     <div class="modal-head"><h3>${isNew?'إضافة صنف جديد':'تعديل الصنف'}</h3><button class="x-btn" data-close>✕</button></div>
     <div class="modal-body">
+      ${f.image ? `<img id="imgPreview" src="${f.image}" style="width:70px;height:70px;border-radius:12px;object-fit:cover;margin-bottom:10px;display:block;">` : `<div id="imgPreview" style="width:70px;height:70px;border-radius:12px;background:var(--primarySoft);display:flex;align-items:center;justify-content:center;font-size:28px;margin-bottom:10px;">👕</div>`}
+      <label class="field"><span class="lbl">صورة الصنف (اختياري)</span><input id="f_image" type="file" accept="image/*"></label>
       <label class="field"><span class="lbl">اسم الصنف</span><input id="f_name" value="${esc(f.name)}"></label>
+      <label class="field"><span class="lbl">التصنيف (اختياري)</span>
+        <input id="f_category" value="${esc(f.category||'')}" list="categoryList" placeholder="مثال: تيشرتات، أحذية، إكسسوارات">
+        <datalist id="categoryList">${[...new Set(state.items.map(i=>i.category).filter(Boolean))].map(c=>`<option value="${esc(c)}">`).join('')}</datalist>
+      </label>
+      <label class="field"><span class="lbl">الباركود (اختياري)</span>
+        <div style="display:flex;gap:6px;">
+          <input id="f_barcode" value="${esc(f.barcode||'')}" style="flex:1;">
+          <button type="button" id="scanBarcodeBtn" class="icon-btn edit">📷</button>
+        </div>
+      </label>
       <div class="grid2">
         <label class="field"><span class="lbl">الوحدة</span><select id="f_unit">${UNITS.map(u=>`<option ${u===f.unit?'selected':''}>${u}</option>`).join('')}</select></label>
         <label class="field"><span class="lbl">الكمية الحالية</span><input id="f_qty" type="number" value="${f.qty}"></label>
@@ -679,11 +781,28 @@ function itemModal(item){
   </div>`;
   const modal = openModal(html);
   modal.querySelector('[data-close]').addEventListener('click', ()=>closeModal(modal));
+  modal.querySelector('#scanBarcodeBtn').addEventListener('click', ()=>{
+    openBarcodeScanner(code=>{ modal.querySelector('#f_barcode').value = code; showToast('تم قراءة الباركود ✅'); });
+  });
+  let pendingImage = f.image || '';
+  modal.querySelector('#f_image').addEventListener('change', async (e)=>{
+    if(e.target.files && e.target.files[0]){
+      try{
+        pendingImage = await resizeImageFile(e.target.files[0]);
+        const preview = modal.querySelector('#imgPreview');
+        const newImg = document.createElement('img');
+        newImg.id='imgPreview'; newImg.src=pendingImage;
+        newImg.style.cssText = 'width:70px;height:70px;border-radius:12px;object-fit:cover;margin-bottom:10px;display:block;';
+        preview.replaceWith(newImg);
+      }catch(err){ showToast('تعذّر تحميل الصورة'); }
+    }
+  });
   modal.querySelector('#saveItemBtn').addEventListener('click', async ()=>{
     const name = modal.querySelector('#f_name').value.trim();
     if(!name) return;
     const next = { id:f.id, name, unit:modal.querySelector('#f_unit').value, qty:+modal.querySelector('#f_qty').value,
-      buyPrice:+modal.querySelector('#f_buy').value, sellPrice:+modal.querySelector('#f_sell').value, minQty:+modal.querySelector('#f_min').value };
+      buyPrice:+modal.querySelector('#f_buy').value, sellPrice:+modal.querySelector('#f_sell').value, minQty:+modal.querySelector('#f_min').value,
+      barcode: modal.querySelector('#f_barcode').value.trim(), image: pendingImage, category: modal.querySelector('#f_category').value.trim() };
     if(isNew) state.items.push(next); else state.items = state.items.map(i=>i.id===next.id?next:i);
     await persist('items');
     closeModal(modal); render();
@@ -692,6 +811,7 @@ function itemModal(item){
 function bindInventory(){
   const s = document.getElementById('invSearch');
   if(s) s.addEventListener('input', e=>{ invQuery = e.target.value; render(); });
+  document.querySelectorAll('[data-cat]').forEach(b=>b.addEventListener('click', ()=>{ invCategory = b.dataset.cat; render(); }));
   const addBtn = document.getElementById('addItemBtn');
   if(addBtn) addBtn.addEventListener('click', ()=>itemModal(null));
   document.querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click', ()=>{
@@ -1489,21 +1609,4 @@ function renderPOSFullScreen(){
   const root = document.getElementById('root');
   root.className = '';
   root.innerHTML = `
-    <div style="min-height:100vh;display:flex;flex-direction:column;background:var(--paper);">
-      <div style="background:var(--primaryDark);color:#fff;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
-        <div style="display:flex;align-items:center;gap:10px;">
-          <div style="width:32px;height:32px;border-radius:8px;background:var(--gold);display:flex;align-items:center;justify-content:center;font-weight:900;font-family:'Tajawal',sans-serif;color:var(--primaryDark);">F</div>
-          <div style="font-family:'Tajawal',sans-serif;font-weight:800;font-size:15px;">نقطة البيع</div>
-        </div>
-        <div style="font-size:12px;opacity:0.85;">${esc(currentUser.name)} · ${fmtDate(todayStr())}</div>
-        <button id="posExitBtn" style="background:rgba(255,255,255,0.15);border:none;color:#fff;padding:8px 16px;border-radius:8px;font-weight:700;cursor:pointer;font-family:'Cairo',sans-serif;">✕ خروج</button>
-      </div>
-      <div style="flex:1;overflow-y:auto;padding:16px;" id="posContent"></div>
-    </div>`;
-  document.getElementById('posContent').innerHTML = renderPOS();
-  bindPOS();
-  document.getElementById('posExitBtn').addEventListener('click', ()=>{ state.view='dashboard'; renderApp(); });
-}
-</script>
-</body>
-</html>
+    <div style="min-hei
