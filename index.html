@@ -488,7 +488,7 @@ function renderPOS(){
         <h3 class="section-title" style="margin:0;">🛒 السلة</h3>
         <span class="badge admin">${posCart.length}</span>
       </div>
-      <div style="max-height:260px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;">
+      <div style="display:flex;flex-direction:column;gap:8px;">
       ${posCart.length===0 ? `<p class="muted" style="font-size:13px;">السلة فاضية. دوس على أي صنف عشان تضيفه.</p>` : posCart.map((l,idx)=>{
         const item = state.items.find(i=>i.id===l.itemId);
         return `<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;border-bottom:1px dashed var(--line);padding-bottom:8px;">
@@ -499,7 +499,7 @@ function renderPOS(){
               <button class="icon-btn edit" data-qdec="${idx}" style="padding:3px 9px;">−</button>
               <span style="font-weight:700;">${l.qty}</span>
               <button class="icon-btn edit" data-qinc="${idx}" style="padding:3px 9px;">+</button>
-              <input type="number" class="cart-price-input" data-priceidx="${idx}" value="${l.price}" style="width:64px;padding:4px 6px;font-size:12px;">
+              <input type="number" class="cart-price-input" data-priceidx="${idx}" value="${l.price}" style="width:52px;padding:3px 4px;font-size:11px;">
             </div>
           </div>
           <div id="cartLineTotal-${idx}" style="font-weight:700;color:var(--primary);font-size:13px;">${money(l.qty*l.price)}</div>
@@ -507,7 +507,6 @@ function renderPOS(){
       }).join('')}
       </div>
       <div style="border-top:1px solid var(--line);margin-top:12px;padding-top:12px;display:flex;flex-direction:column;gap:8px;">
-        <div class="row-line"><span>إجمالي الأصناف</span><b>${posCart.length}</b></div>
         <div class="row-line"><span>إجمالي الكمية</span><b>${totalQty}</b></div>
         <div class="row-line"><span>الإجمالي قبل الخصم</span><b id="posSubtotal">${money(cartTotal)}</b></div>
         <label class="field" style="margin-bottom:2px;"><span class="lbl">الخصم (F4)</span><input id="posDiscount" type="number" value="${posDiscount}"></label>
@@ -520,9 +519,6 @@ function renderPOS(){
           <input id="posPaid" type="number" value="${!posCustomerId ? finalTotal : (payNow||'')}" placeholder="0" ${!posCustomerId?'disabled':''}>
         </label>
         ${due>0 ? `<div class="row-line" style="color:var(--brick);"><span>متبقي (آجل)</span><b id="posDueDisplay">${money(due)}</b></div>` : ``}
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:2px;">
-          ${['نقدي','بنك','إنستاباي','فيزا/ماستركارد'].map(pm=>`<button class="btn ${posPaymentMethod===pm?'btn-primary':''}" data-paymethod="${esc(pm)}" style="${posPaymentMethod!==pm?'background:var(--primarySoft);color:var(--primary);':''}justify-content:center;font-size:12px;padding:8px;">${pm}</button>`).join('')}
-        </div>
         <button class="btn btn-gold" id="completeSaleBtn" style="width:100%;justify-content:center;margin-top:10px;font-size:15px;">✓ إتمام البيع (F9)</button>
       </div>
     </div>
