@@ -1064,6 +1064,9 @@ function buildInvoiceHTML(inv){
 
       <div style="padding:18px 34px 0;">
         <div style="border:1px solid #E4DFD1;border-radius:12px;padding:16px 20px;">
+          ${(inv.discount||0) > 0 ? `
+          <div style="display:flex;justify-content:space-between;padding:5px 0;"><span style="font-weight:700;">الإجمالي قبل الخصم</span><b>${money(inv.subtotal||(inv.total+inv.discount))}</b></div>
+          <div style="display:flex;justify-content:space-between;padding:5px 0;"><span style="font-weight:700;">الخصم</span><b style="color:#A8462E;">-${money(inv.discount)}</b></div>` : ``}
           <div style="display:flex;justify-content:space-between;padding:5px 0;"><span style="font-weight:700;">الإجمالي</span><b style="font-size:16px;">${money(inv.total)}</b></div>
           <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px dashed #E4DFD1;padding-bottom:10px;"><span style="font-weight:700;">المدفوع</span><b style="font-size:16px;">${money(inv.paid)}</b></div>
           <div style="display:flex;justify-content:space-between;padding:10px 12px;margin-top:8px;background:#F3E0D8;border-radius:8px;"><span style="font-weight:800;">المتبقي</span><b style="font-size:18px;color:#A8462E;">${money(inv.due)}</b></div>
@@ -1238,6 +1241,8 @@ function invoiceModal(type, existingInv){
         <button class="btn" id="addLineBtn" style="background:var(--primarySoft);color:var(--primary);padding:6px 12px;font-size:12px;">+ إضافة صنف</button>
       </div>
       <div id="linesWrap"></div>
+      <div class="total-line" style="border-top:1px solid var(--line);"><span style="font-weight:600;">الإجمالي قبل الخصم</span><b id="subtotalDisplay">${money(0)}</b></div>
+      <label class="field"><span class="lbl">الخصم</span><input id="inv_discount" type="number" value="${isEdit?(existingInv.discount||0):0}"></label>
       <div class="total-line"><span style="font-weight:600;">الإجمالي</span><b id="totalDisplay">${money(0)}</b></div>
       <label class="field"><span class="lbl">المبلغ المدفوع الآن</span><input id="inv_paid" type="number" value="${isEdit?existingInv.paid:0}"></label>
       <p class="muted" style="font-size:12px;">المتبقي (آجل): <b id="dueDisplay" style="color:var(--brick);">${money(0)}</b></p>
@@ -1268,8 +1273,11 @@ function invoiceModal(type, existingInv){
     });
   }
   function updateTotals(){
-    const total = lines.reduce((s,l)=>s+l.qty*l.price,0);
+    const subtotal = lines.reduce((s,l)=>s+l.qty*l.price,0);
+    const discount = +modal.querySelector('#inv_discount').value || 0;
+    const total = Math.max(subtotal - discount, 0);
     const paid = +modal.querySelector('#inv_paid').value || 0;
+    modal.querySelector('#subtotalDisplay').textContent = money(subtotal);
     modal.querySelector('#totalDisplay').textContent = money(total);
     modal.querySelector('#dueDisplay').textContent = money(Math.max(total-paid,0));
   }
@@ -1279,18 +1287,21 @@ function invoiceModal(type, existingInv){
     renderLines(); updateTotals();
   });
   modal.querySelector('#inv_paid').addEventListener('input', updateTotals);
+  modal.querySelector('#inv_discount').addEventListener('input', updateTotals);
   renderLines(); updateTotals();
   modal.querySelector('#saveInvBtn').addEventListener('click', async ()=>{
     const partyId = modal.querySelector('#inv_party').value;
     if(!partyId || lines.length===0) return;
     if(isEdit) reverseInvoiceEffects(existingInv);
-    const total = lines.reduce((s,l)=>s+l.qty*l.price,0);
+    const subtotal = lines.reduce((s,l)=>s+l.qty*l.price,0);
+    const discount = +modal.querySelector('#inv_discount').value || 0;
+    const total = Math.max(subtotal - discount, 0);
     const paid = Math.min(+modal.querySelector('#inv_paid').value || 0, total);
     const due = Math.max(total-paid,0);
     const party = state.parties.find(p=>p.id===partyId);
     const previousBalance = party ? (party.balance||0) : 0;
     const inv = { id: isEdit?existingInv.id:uid(), invoiceNumber: isEdit?existingInv.invoiceNumber:('INV-'+String(state.invoices.length+1).padStart(6,'0')), type, partyId, partyName: party?party.name:'', date: modal.querySelector('#inv_date').value || todayStr(),
-      lines: lines.map(l=>({...l, itemName: state.items.find(i=>i.id===l.itemId)?.name || '', cost: state.items.find(i=>i.id===l.itemId)?.buyPrice || 0})), total, paid, due, previousBalance,
+      lines: lines.map(l=>({...l, itemName: state.items.find(i=>i.id===l.itemId)?.name || '', cost: state.items.find(i=>i.id===l.itemId)?.buyPrice || 0})), subtotal, discount, total, paid, due, previousBalance,
       createdBy: isEdit?existingInv.createdBy:currentUser.name, createdById: isEdit?existingInv.createdById:currentUser.id };
     if(isEdit) inv.editedBy = currentUser.name;
     inv.lines.forEach(l=>{ state.items = state.items.map(it => it.id===l.itemId ? {...it, qty: it.qty + (type==='buy'? l.qty : -l.qty)} : it); });
