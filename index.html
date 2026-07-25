@@ -554,7 +554,7 @@ async function completeSale(){
     type:'sell', partyId: posCustomerId||null, partyName: party?party.name:'عميل نقدي',
     date: todayStr(),
     lines: posCart.map(l=>({itemId:l.itemId, qty:l.qty, price:l.price, itemName: state.items.find(i=>i.id===l.itemId)?.name||'', cost: state.items.find(i=>i.id===l.itemId)?.buyPrice||0})),
-    total: finalTotal, paid: payNow, due, previousBalance,
+    total: finalTotal, subtotal: cartTotal, discount: (+posDiscount||0), paid: payNow, due, previousBalance,
     createdBy: currentUser.name, createdById: currentUser.id, paymentMethod: posPaymentMethod,
   };
   inv.lines.forEach(l=>{ state.items = state.items.map(it=>it.id===l.itemId?{...it, qty: it.qty - l.qty}:it); });
