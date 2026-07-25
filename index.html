@@ -377,6 +377,7 @@ function navItemsFor(){
     {key:'expenses', label:'المصروفات', ic:'💸', roles:['admin']},
     {key:'reports', label:'التقارير', ic:'📊', roles:['admin']},
     {key:'users', label:'المستخدمين', ic:'🔑', roles:['admin']},
+    {key:'backup', label:'النسخ الاحتياطي', ic:'💾', roles:['admin']},
   ];
   return all.filter(n => n.roles.includes(currentUser.role));
 }
@@ -445,7 +446,20 @@ function renderPOS(){
   const payNow = posCustomerId ? Math.min(posPaidAmount||0, finalTotal) : finalTotal;
   const due = Math.max(finalTotal - payNow, 0);
   const customerOptions = state.parties.filter(p=>p.type==='customer');
+  const selectedParty = posCustomerId ? state.parties.find(p=>p.id===posCustomerId) : null;
   return `
+  <div class="card" style="margin-bottom:16px;padding:14px 18px;">
+    <div style="display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap;">
+      <label class="field" style="flex:1;min-width:200px;margin-bottom:0;">
+        <span class="lbl">العميل (F2)</span>
+        <select id="posCustomer"><option value="">عميل نقدي (بدون تسجيل)</option>${customerOptions.map(p=>`<option value="${p.id}" ${p.id===posCustomerId?'selected':''}>${esc(p.name)}</option>`).join('')}</select>
+      </label>
+      ${selectedParty ? `<div style="text-align:center;flex-shrink:0;">
+        <div class="muted" style="font-size:11px;">الرصيد السابق</div>
+        <div style="font-weight:800;font-size:17px;color:${selectedParty.balance>0?'var(--brick)':'var(--primary)'};">${money(selectedParty.balance||0)}</div>
+      </div>` : ``}
+    </div>
+  </div>
   <div class="pos-grid">
     <div>
       <div style="display:flex;gap:8px;margin-bottom:14px;">
@@ -457,7 +471,7 @@ function renderPOS(){
       </div>
       ${categories.length>1 ? `<div class="tabs" style="flex-wrap:wrap;margin-bottom:14px;">${categories.map(c=>`<button class="tab-btn ${posCategory===c?'active':''}" data-poscat="${esc(c)}">${esc(c)}${posCategory===c?' ✓':''}</button>`).join('')}</div>` : ''}
       ${filtered.length===0 ? `<div class="empty"><div class="circle">🛒</div><p>لا توجد أصناف مطابقة.</p></div>` : `
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:10px;">
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(82px,1fr));gap:8px;">
         ${filtered.map(i=>`
         <div class="card pos-item" data-additem="${i.id}" style="cursor:pointer;text-align:center;padding:12px 8px;">
           <div style="position:relative;width:100%;aspect-ratio:1;background:var(--primarySoft);border-radius:10px;overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:28px;margin-bottom:8px;">
@@ -493,9 +507,6 @@ function renderPOS(){
       }).join('')}
       </div>
       <div style="border-top:1px solid var(--line);margin-top:12px;padding-top:12px;display:flex;flex-direction:column;gap:8px;">
-        <label class="field" style="margin-bottom:2px;"><span class="lbl">العميل</span>
-          <select id="posCustomer"><option value="">عميل نقدي (بدون تسجيل)</option>${customerOptions.map(p=>`<option value="${p.id}" ${p.id===posCustomerId?'selected':''}>${esc(p.name)}</option>`).join('')}</select>
-        </label>
         <div class="row-line"><span>إجمالي الأصناف</span><b>${posCart.length}</b></div>
         <div class="row-line"><span>إجمالي الكمية</span><b>${totalQty}</b></div>
         <div class="row-line"><span>الإجمالي قبل الخصم</span><b id="posSubtotal">${money(cartTotal)}</b></div>
@@ -1562,6 +1573,53 @@ function bindReports(){
 }
 
 /* ---------------- Users management (admin only) ---------------- */
+/* ---------------- Backup & Restore (admin only) ---------------- */
+function renderBackup(){
+  return `
+  <div class="card">
+    <h3 class="section-title">💾 تصدير نسخة احتياطية</h3>
+    <p class="muted" style="font-size:13px;">احفظ نسخة من كل بيانات المتجر (الأصناف، العملاء، الفواتير، المصروفات، المستخدمين...) في ملف على جهازك.</p>
+    <button class="btn btn-primary" id="exportBackupBtn" style="margin-top:10px;">⬇️ تنزيل نسخة احتياطية</button>
+  </div>
+  <div class="card" style="margin-top:18px;">
+    <h3 class="section-title" style="color:var(--brick);">♻️ استعادة من نسخة سابقة</h3>
+    <p class="muted" style="font-size:13px;">تنبيه: استعادة نسخة قديمة هتستبدل كل البيانات الحالية بالكامل لكل المستخدمين، ومفيش رجوع بعدها.</p>
+    <label class="field" style="margin-top:10px;"><span class="lbl">اختار ملف النسخة الاحتياطية (.json)</span><input type="file" id="restoreFileInput" accept="application/json"></label>
+    <button class="btn" id="restoreBackupBtn" style="background:var(--brickSoft);color:var(--brick);">♻️ استعادة النسخة</button>
+  </div>`;
+}
+function bindBackup(){
+  const exportBtn = document.getElementById('exportBackupBtn');
+  if(exportBtn) exportBtn.addEventListener('click', ()=>{
+    const backup = {
+      exportedAt: new Date().toISOString(),
+      items: state.items, parties: state.parties, invoices: state.invoices,
+      payments: state.payments, adjustments: state.adjustments, users: state.users, expenses: state.expenses,
+    };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `farfetch-backup-${todayStr()}.json`; a.click();
+    URL.revokeObjectURL(url);
+    showToast('تم تنزيل النسخة الاحتياطية ✅');
+  });
+  const restoreBtn = document.getElementById('restoreBackupBtn');
+  if(restoreBtn) restoreBtn.addEventListener('click', async ()=>{
+    const fileInput = document.getElementById('restoreFileInput');
+    if(!fileInput.files || !fileInput.files[0]){ showToast('اختار ملف النسخة الاحتياطية الأول'); return; }
+    if(!confirm('متأكد إنك عايز تستعيد النسخة دي؟ هيستبدل كل البيانات الحالية بالكامل ومفيش رجوع.')) return;
+    try{
+      const text = await fileInput.files[0].text();
+      const backup = JSON.parse(text);
+      state.items = backup.items||[]; state.parties = backup.parties||[]; state.invoices = backup.invoices||[];
+      state.payments = backup.payments||[]; state.adjustments = backup.adjustments||[]; state.users = backup.users||[]; state.expenses = backup.expenses||[];
+      await Promise.all([persist('items'),persist('parties'),persist('invoices'),persist('payments'),persist('adjustments'),persist('users'),persist('expenses')]);
+      showToast('تم استعادة النسخة الاحتياطية بنجاح ✅');
+      render();
+    }catch(e){ showToast('الملف غير صالح أو تالف'); }
+  });
+}
+
 function renderUsers(){
   return `
   <div class="toolbar">
@@ -1633,7 +1691,7 @@ function render(){
   }
   if(!document.getElementById('sidebar')){ renderApp(); return; }
   renderNav();
-  const titleMap = {dashboard:'الرئيسية', inventory:'المخزون', audit:'الجرد', invoices:'الفواتير', parties:'العملاء والموردين', collections:'التحصيلات والآجل', expenses:'المصروفات', reports:'التقارير', users:'المستخدمين'};
+  const titleMap = {dashboard:'الرئيسية', inventory:'المخزون', audit:'الجرد', invoices:'الفواتير', parties:'العملاء والموردين', collections:'التحصيلات والآجل', expenses:'المصروفات', reports:'التقارير', users:'المستخدمين', backup:'النسخ الاحتياطي'};
   document.getElementById('pageTitle').textContent = titleMap[state.view] || '';
   const content = document.getElementById('content');
   const allowed = navItemsFor().map(n=>n.key);
@@ -1647,6 +1705,7 @@ function render(){
   else if(state.view==='expenses'){ content.innerHTML = renderExpenses(); bindExpenses(); }
   else if(state.view==='reports'){ content.innerHTML = renderReports(); bindReports(); }
   else if(state.view==='users'){ content.innerHTML = renderUsers(); bindUsers(); }
+  else if(state.view==='backup'){ content.innerHTML = renderBackup(); bindBackup(); }
 }
 function renderPOSFullScreen(){
   const root = document.getElementById('root');
