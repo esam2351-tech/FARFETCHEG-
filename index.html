@@ -460,68 +460,66 @@ function renderPOS(){
       </div>` : ``}
     </div>
   </div>
-  <div class="pos-grid">
-    <div>
-      <div style="display:flex;gap:8px;margin-bottom:14px;">
-        <div class="search-wrap" style="max-width:100%;">
-          <span class="search-icon">🔎</span>
-          <input id="posSearch" placeholder="ابحث بالاسم... (F3)" value="${esc(posSearch)}">
-        </div>
-        <button id="posScanBtn" class="btn btn-primary" style="flex-shrink:0;">📷 مسح</button>
-      </div>
-      ${categories.length>1 ? `<div class="tabs" style="flex-wrap:wrap;margin-bottom:14px;">${categories.map(c=>`<button class="tab-btn ${posCategory===c?'active':''}" data-poscat="${esc(c)}">${esc(c)}${posCategory===c?' ✓':''}</button>`).join('')}</div>` : ''}
-      ${filtered.length===0 ? `<div class="empty"><div class="circle">🛒</div><p>لا توجد أصناف مطابقة.</p></div>` : `
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(82px,1fr));gap:8px;">
-        ${filtered.map(i=>`
-        <div class="card pos-item" data-additem="${i.id}" style="cursor:pointer;text-align:center;padding:12px 8px;">
-          <div style="position:relative;width:100%;aspect-ratio:1;background:var(--primarySoft);border-radius:10px;overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:28px;margin-bottom:8px;">
-            ${i.image?`<img src="${i.image}" style="width:100%;height:100%;object-fit:cover;">`:'👕'}
-            <span style="position:absolute;top:5px;left:5px;background:rgba(255,255,255,0.92);color:${i.qty<=i.minQty?'var(--brick)':'var(--primary)'};font-size:10px;font-weight:800;padding:2px 7px;border-radius:20px;box-shadow:0 1px 4px rgba(0,0,0,0.15);">📦 ${i.qty}</span>
-          </div>
-          <div style="font-weight:700;font-size:13px;">${esc(i.name)}</div>
-          <div style="color:var(--primary);font-weight:700;font-size:13px;">${money(i.sellPrice)}</div>
-        </div>`).join('')}
-      </div>`}
+  <div class="card" style="padding:14px;margin-bottom:16px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+      <h3 class="section-title" style="margin:0;">🛒 السلة</h3>
+      <span class="badge admin">${posCart.length}</span>
     </div>
-    <div class="card" style="padding:14px;height:fit-content;">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-        <h3 class="section-title" style="margin:0;">🛒 السلة</h3>
-        <span class="badge admin">${posCart.length}</span>
-      </div>
-      <div style="display:flex;flex-direction:column;gap:8px;">
-      ${posCart.length===0 ? `<p class="muted" style="font-size:13px;">السلة فاضية. دوس على أي صنف عشان تضيفه.</p>` : posCart.map((l,idx)=>{
-        const item = state.items.find(i=>i.id===l.itemId);
-        return `<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;border-bottom:1px dashed var(--line);padding-bottom:8px;">
-          <button class="icon-btn del" data-rmline="${idx}" style="flex-shrink:0;">🗑️</button>
-          <div style="flex:1;min-width:0;">
-            <div style="font-weight:700;font-size:13px;">${esc(item?item.name:'')}</div>
-            <div style="display:flex;align-items:center;gap:6px;margin-top:4px;flex-wrap:wrap;">
-              <button class="icon-btn edit" data-qdec="${idx}" style="padding:3px 9px;">−</button>
-              <span style="font-weight:700;">${l.qty}</span>
-              <button class="icon-btn edit" data-qinc="${idx}" style="padding:3px 9px;">+</button>
-              <input type="number" class="cart-price-input" data-priceidx="${idx}" value="${l.price}" style="width:52px;padding:3px 4px;font-size:11px;">
-            </div>
+    <div style="display:flex;flex-direction:column;gap:8px;">
+    ${posCart.length===0 ? `<p class="muted" style="font-size:13px;">السلة فاضية. دوس على أي صنف عشان تضيفه.</p>` : posCart.map((l,idx)=>{
+      const item = state.items.find(i=>i.id===l.itemId);
+      return `<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;border-bottom:1px dashed var(--line);padding-bottom:8px;">
+        <button class="icon-btn del" data-rmline="${idx}" style="flex-shrink:0;">🗑️</button>
+        <div style="flex:1;min-width:0;">
+          <div style="font-weight:700;font-size:13px;">${esc(item?item.name:'')}</div>
+          <div style="display:flex;align-items:center;gap:6px;margin-top:4px;flex-wrap:wrap;">
+            <button class="icon-btn edit" data-qdec="${idx}" style="padding:3px 9px;">−</button>
+            <span style="font-weight:700;">${l.qty}</span>
+            <button class="icon-btn edit" data-qinc="${idx}" style="padding:3px 9px;">+</button>
+            <input type="number" class="cart-price-input" data-priceidx="${idx}" value="${l.price}" style="width:52px;padding:3px 4px;font-size:11px;">
           </div>
-          <div id="cartLineTotal-${idx}" style="font-weight:700;color:var(--primary);font-size:13px;">${money(l.qty*l.price)}</div>
-        </div>`;
-      }).join('')}
-      </div>
-      <div style="border-top:1px solid var(--line);margin-top:12px;padding-top:12px;display:flex;flex-direction:column;gap:8px;">
-        <div class="row-line"><span>إجمالي الكمية</span><b>${totalQty}</b></div>
-        <div class="row-line"><span>الإجمالي قبل الخصم</span><b id="posSubtotal">${money(cartTotal)}</b></div>
-        <label class="field" style="margin-bottom:2px;"><span class="lbl">الخصم (F4)</span><input id="posDiscount" type="number" value="${posDiscount}"></label>
-        <div style="display:flex;justify-content:space-between;padding:10px 0;border-top:2px solid var(--primary);margin-top:4px;">
-          <span style="font-weight:800;">المبلغ المطلوب</span>
-          <b id="posFinalTotal" style="font-size:18px;color:var(--primary);">${money(finalTotal)}</b>
         </div>
-        <label class="field" style="margin-bottom:2px;">
-          <span class="lbl">المدفوع الآن${!posCustomerId?' (البيع النقدي لازم يتدفع بالكامل)':''}</span>
-          <input id="posPaid" type="number" value="${!posCustomerId ? finalTotal : (payNow||'')}" placeholder="0" ${!posCustomerId?'disabled':''}>
-        </label>
-        ${due>0 ? `<div class="row-line" style="color:var(--brick);"><span>متبقي (آجل)</span><b id="posDueDisplay">${money(due)}</b></div>` : ``}
-        <button class="btn btn-gold" id="completeSaleBtn" style="width:100%;justify-content:center;margin-top:10px;font-size:15px;">✓ إتمام البيع (F9)</button>
-      </div>
+        <div id="cartLineTotal-${idx}" style="font-weight:700;color:var(--primary);font-size:13px;">${money(l.qty*l.price)}</div>
+      </div>`;
+    }).join('')}
     </div>
+    <div style="border-top:1px solid var(--line);margin-top:12px;padding-top:12px;display:flex;flex-direction:column;gap:8px;">
+      <div class="row-line"><span>إجمالي الكمية</span><b>${totalQty}</b></div>
+      <div class="row-line"><span>الإجمالي قبل الخصم</span><b id="posSubtotal">${money(cartTotal)}</b></div>
+      <label class="field" style="margin-bottom:2px;"><span class="lbl">الخصم (F4)</span><input id="posDiscount" type="number" value="${posDiscount}"></label>
+      <div style="display:flex;justify-content:space-between;padding:10px 0;border-top:2px solid var(--primary);margin-top:4px;">
+        <span style="font-weight:800;">المبلغ المطلوب</span>
+        <b id="posFinalTotal" style="font-size:18px;color:var(--primary);">${money(finalTotal)}</b>
+      </div>
+      <label class="field" style="margin-bottom:2px;">
+        <span class="lbl">المدفوع الآن${!posCustomerId?' (البيع النقدي لازم يتدفع بالكامل)':''}</span>
+        <input id="posPaid" type="number" value="${!posCustomerId ? finalTotal : (payNow||'')}" placeholder="0" ${!posCustomerId?'disabled':''}>
+      </label>
+      ${due>0 ? `<div class="row-line" style="color:var(--brick);"><span>متبقي (آجل)</span><b id="posDueDisplay">${money(due)}</b></div>` : ``}
+      <button class="btn btn-gold" id="completeSaleBtn" style="width:100%;justify-content:center;margin-top:10px;font-size:15px;">✓ إتمام البيع (F9)</button>
+    </div>
+  </div>
+  <div>
+    <div style="display:flex;gap:8px;margin-bottom:14px;">
+      <div class="search-wrap" style="max-width:100%;">
+        <span class="search-icon">🔎</span>
+        <input id="posSearch" placeholder="ابحث بالاسم... (F3)" value="${esc(posSearch)}">
+      </div>
+      <button id="posScanBtn" class="btn btn-primary" style="flex-shrink:0;">📷 مسح</button>
+    </div>
+    ${categories.length>1 ? `<div class="tabs" style="flex-wrap:wrap;margin-bottom:14px;">${categories.map(c=>`<button class="tab-btn ${posCategory===c?'active':''}" data-poscat="${esc(c)}">${esc(c)}${posCategory===c?' ✓':''}</button>`).join('')}</div>` : ''}
+    ${filtered.length===0 ? `<div class="empty"><div class="circle">🛒</div><p>لا توجد أصناف مطابقة.</p></div>` : `
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(82px,1fr));gap:8px;">
+      ${filtered.map(i=>`
+      <div class="card pos-item" data-additem="${i.id}" style="cursor:pointer;text-align:center;padding:10px 6px;">
+        <div style="position:relative;width:100%;aspect-ratio:1;background:var(--primarySoft);border-radius:10px;overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:28px;margin-bottom:6px;">
+          ${i.image?`<img src="${i.image}" style="width:100%;height:100%;object-fit:cover;">`:'👕'}
+          <span style="position:absolute;top:5px;left:5px;background:rgba(255,255,255,0.92);color:${i.qty<=i.minQty?'var(--brick)':'var(--primary)'};font-size:10px;font-weight:800;padding:2px 7px;border-radius:20px;box-shadow:0 1px 4px rgba(0,0,0,0.15);">📦 ${i.qty}</span>
+        </div>
+        <div style="font-weight:600;font-size:10.5px;line-height:1.25;">${esc(i.name)}</div>
+        <div style="color:var(--primary);font-weight:700;font-size:11.5px;margin-top:2px;">${money(i.sellPrice)}</div>
+      </div>`).join('')}
+    </div>`}
   </div>
   <div class="card" style="margin-top:16px;display:flex;gap:14px;flex-wrap:wrap;justify-content:center;">
     <span class="muted" style="font-size:11px;">F2 عميل</span>
@@ -1533,6 +1531,10 @@ function renderReports(){
   }));
   const bestSellers = Object.values(bestMap).sort((a,b)=>b.qty-a.qty).slice(0,10);
 
+  const paymentsInRange = state.payments.filter(p=>p.date>=from && p.date<=to).sort((a,b)=>a.date<b.date?1:-1);
+  const totalCollected = paymentsInRange.filter(p=>p.direction==='in').reduce((s,p)=>s+p.amount,0);
+  const totalPaidOut = paymentsInRange.filter(p=>p.direction==='out').reduce((s,p)=>s+p.amount,0);
+
   const presets = [['today','اليوم'],['week','آخر أسبوع'],['month','هذا الشهر'],['all','كل الفترات'],['custom','مخصص']];
 
   return `
@@ -1540,6 +1542,7 @@ function renderReports(){
     <div class="tabs" style="flex-wrap:wrap;">
       ${presets.map(([k,label])=>`<button class="tab-btn ${reportsPreset===k?'active':''}" data-preset="${k}">${label}</button>`).join('')}
     </div>
+    <button class="btn" id="printReportBtn" style="background:var(--primarySoft);color:var(--primary);">🖨️ طباعة التقرير</button>
   </div>
   ${reportsPreset==='custom' ? `
   <div class="card" style="margin-bottom:16px;">
@@ -1572,6 +1575,27 @@ function renderReports(){
       ${bestSellers.map(b=>`<tr><td style="font-weight:600;">${esc(b.name)}</td><td class="muted">${b.qty}</td><td style="font-weight:700;color:var(--primary);">${money(b.revenue)}</td></tr>`).join('')}
       </tbody>
     </table></div>`}
+  </div>
+
+  <div class="card" style="margin-top:18px;">
+    <h3 class="section-title">💰 تقرير التحصيلات</h3>
+    <div class="grid-stats" style="grid-template-columns:1fr 1fr;margin-bottom:14px;">
+      <div class="card"><div class="stat-label">محصّل من العملاء</div><div class="stat-value" style="color:var(--primary);">${money(totalCollected)}</div></div>
+      <div class="card"><div class="stat-label">مدفوع للموردين</div><div class="stat-value" style="color:var(--brick);">${money(totalPaidOut)}</div></div>
+    </div>
+    ${paymentsInRange.length===0 ? `<p class="muted" style="font-size:14px;">لا توجد عمليات تحصيل أو دفع في الفترة دي.</p>` : `
+    <div class="table-wrap"><table>
+      <thead><tr><th>التاريخ</th><th>الطرف</th><th>النوع</th><th>المبلغ</th><th>بواسطة</th></tr></thead>
+      <tbody>
+      ${paymentsInRange.map(p=>`<tr>
+        <td class="muted">${fmtDate(p.date)}</td>
+        <td style="font-weight:600;">${esc(p.partyName)}</td>
+        <td class="muted">${p.direction==='in'?'تحصيل':'دفع'}</td>
+        <td style="font-weight:700;color:${p.direction==='in'?'var(--primary)':'var(--brick)'};">${money(p.amount)}</td>
+        <td class="muted">${esc(p.by||'—')}</td>
+      </tr>`).join('')}
+      </tbody>
+    </table></div>`}
   </div>`;
 }
 function bindReports(){
@@ -1582,6 +1606,64 @@ function bindReports(){
     reportsTo = document.getElementById('rep_to').value;
     render();
   });
+  const printBtn = document.getElementById('printReportBtn');
+  if(printBtn) printBtn.addEventListener('click', printReport);
+}
+function printReport(){
+  const {from, to} = reportsRange();
+  const sellInvoices = state.invoices.filter(v=>v.type==='sell' && v.date>=from && v.date<=to);
+  const expensesInRange = state.expenses.filter(e=>e.date>=from && e.date<=to);
+  const revenue = sellInvoices.reduce((s,v)=>s+v.total,0);
+  const cogs = sellInvoices.reduce((s,v)=> s + v.lines.reduce((s2,l)=>{
+    const cost = (l.cost!==undefined) ? l.cost : (state.items.find(i=>i.id===l.itemId)?.buyPrice||0);
+    return s2 + cost*l.qty;
+  },0), 0);
+  const grossProfit = revenue - cogs;
+  const totalExpenses = expensesInRange.reduce((s,e)=>s+e.amount,0);
+  const netProfit = grossProfit - totalExpenses;
+  const bestMap = {};
+  sellInvoices.forEach(v=>v.lines.forEach(l=>{
+    if(!bestMap[l.itemName]) bestMap[l.itemName] = {name:l.itemName, qty:0, revenue:0};
+    bestMap[l.itemName].qty += (+l.qty||0);
+    bestMap[l.itemName].revenue += l.qty*l.price;
+  }));
+  const bestSellers = Object.values(bestMap).sort((a,b)=>b.qty-a.qty).slice(0,10);
+  const paymentsInRange = state.payments.filter(p=>p.date>=from && p.date<=to).sort((a,b)=>a.date<b.date?1:-1);
+  const totalCollected = paymentsInRange.filter(p=>p.direction==='in').reduce((s,p)=>s+p.amount,0);
+  const totalPaidOut = paymentsInRange.filter(p=>p.direction==='out').reduce((s,p)=>s+p.amount,0);
+
+  const area = document.getElementById('printArea');
+  area.innerHTML = `
+    <div style="font-family:'Cairo',sans-serif;direction:rtl;color:#1C2420;width:720px;margin:0 auto;padding:28px;background:#fff;font-weight:600;">
+      <div style="border-bottom:3px solid #0F5C4F;padding-bottom:14px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:center;">
+        <div style="font-family:'Tajawal',sans-serif;font-weight:900;font-size:22px;color:#0F5C4F;">FARFETCH.EG</div>
+        <div style="font-size:12px;color:#6E7A73;">تقرير من ${fmtDate(from)} إلى ${fmtDate(to)}</div>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:20px;">
+        <tbody>
+          <tr><td style="padding:8px;border-bottom:1px solid #E4DFD1;">المبيعات (${sellInvoices.length} فاتورة)</td><td style="padding:8px;border-bottom:1px solid #E4DFD1;text-align:left;font-weight:800;">${money(revenue)}</td></tr>
+          <tr><td style="padding:8px;border-bottom:1px solid #E4DFD1;">تكلفة البضاعة المباعة</td><td style="padding:8px;border-bottom:1px solid #E4DFD1;text-align:left;font-weight:800;color:#A8462E;">${money(cogs)}</td></tr>
+          <tr><td style="padding:8px;border-bottom:1px solid #E4DFD1;">مجمل الربح</td><td style="padding:8px;border-bottom:1px solid #E4DFD1;text-align:left;font-weight:800;color:#C79A2E;">${money(grossProfit)}</td></tr>
+          <tr><td style="padding:8px;border-bottom:1px solid #E4DFD1;">المصروفات</td><td style="padding:8px;border-bottom:1px solid #E4DFD1;text-align:left;font-weight:800;color:#A8462E;">${money(totalExpenses)}</td></tr>
+          <tr><td style="padding:10px 8px;font-weight:800;">صافي الربح</td><td style="padding:10px 8px;text-align:left;font-weight:900;font-size:16px;color:${netProfit>=0?'#0F5C4F':'#A8462E'};">${money(netProfit)}</td></tr>
+        </tbody>
+      </table>
+      <h3 style="color:#0F5C4F;font-family:'Tajawal',sans-serif;font-size:15px;margin-bottom:10px;">🏆 أكتر الأصناف مبيعًا</h3>
+      <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:20px;">
+        <thead><tr style="background:#0F5C4F;color:#fff;"><th style="padding:8px;">الصنف</th><th style="padding:8px;">الكمية</th><th style="padding:8px;">الإيراد</th></tr></thead>
+        <tbody>${bestSellers.map(b=>`<tr><td style="padding:7px;border-bottom:1px solid #E4DFD1;font-weight:700;">${esc(b.name)}</td><td style="padding:7px;border-bottom:1px solid #E4DFD1;text-align:center;">${b.qty}</td><td style="padding:7px;border-bottom:1px solid #E4DFD1;text-align:center;color:#0F5C4F;font-weight:700;">${money(b.revenue)}</td></tr>`).join('') || `<tr><td colspan="3" style="padding:10px;text-align:center;color:#6E7A73;">لا توجد مبيعات</td></tr>`}</tbody>
+      </table>
+      <h3 style="color:#0F5C4F;font-family:'Tajawal',sans-serif;font-size:15px;margin-bottom:10px;">💰 تقرير التحصيلات</h3>
+      <div style="display:flex;justify-content:space-between;margin-bottom:10px;font-size:13px;">
+        <span>محصّل من العملاء: <b style="color:#0F5C4F;">${money(totalCollected)}</b></span>
+        <span>مدفوع للموردين: <b style="color:#A8462E;">${money(totalPaidOut)}</b></span>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px;">
+        <thead><tr style="background:#0F5C4F;color:#fff;"><th style="padding:8px;">التاريخ</th><th style="padding:8px;">الطرف</th><th style="padding:8px;">النوع</th><th style="padding:8px;">المبلغ</th></tr></thead>
+        <tbody>${paymentsInRange.map(p=>`<tr><td style="padding:7px;border-bottom:1px solid #E4DFD1;">${fmtDate(p.date)}</td><td style="padding:7px;border-bottom:1px solid #E4DFD1;font-weight:700;">${esc(p.partyName)}</td><td style="padding:7px;border-bottom:1px solid #E4DFD1;text-align:center;">${p.direction==='in'?'تحصيل':'دفع'}</td><td style="padding:7px;border-bottom:1px solid #E4DFD1;text-align:center;font-weight:700;">${money(p.amount)}</td></tr>`).join('') || `<tr><td colspan="4" style="padding:10px;text-align:center;color:#6E7A73;">لا توجد عمليات</td></tr>`}</tbody>
+      </table>
+    </div>`;
+  window.print();
 }
 
 /* ---------------- Users management (admin only) ---------------- */
