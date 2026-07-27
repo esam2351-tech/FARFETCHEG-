@@ -1368,7 +1368,7 @@ function renderParties(){
       <div>
         <div style="font-weight:600;">${esc(p.name)}</div>
         <div class="muted" style="font-size:12px;">${esc(p.phone||'بدون رقم')}</div>
-        <div style="font-weight:600;font-size:14px;margin-top:4px;color:${p.balance>0?'var(--brick)':'var(--primary)'};">${p.balance>0?('مستحق: '+money(p.balance)):'لا يوجد مستحقات'}</div>
+        <div style="font-weight:600;font-size:14px;margin-top:4px;color:${p.balance>0?'var(--brick)':(p.balance<0?'var(--primary)':'var(--muted)')};">${p.balance>0?('مستحق: '+money(p.balance)) : (p.balance<0?('له: '+money(Math.abs(p.balance))) : 'لا يوجد مستحقات')}</div>
       </div>
       ${isAdmin() ? `<div style="display:flex;gap:6px;"><button class="icon-btn edit" data-pedit="${p.id}">✏️</button><button class="icon-btn del" data-pdel="${p.id}">🗑️</button></div>` : ''}
     </div>`).join('')}</div>`}
@@ -1430,34 +1430,76 @@ function renderCollections(){
   <div class="card" style="margin-top:18px;">
     <h3 class="section-title">آخر عمليات التحصيل والدفع</h3>
     ${recent.length===0 ? `<p class="muted" style="font-size:14px;">لا توجد عمليات مسجلة بعد.</p>` :
-      recent.map(p=>`<div class="row-line"><div style="display:flex;align-items:center;gap:8px;"><span>${p.direction==='in'?'⬇️':'⬆️'}</span><span>${esc(p.partyName)}</span><span class="muted" style="font-size:11px;">${fmtDate(p.date)} ${p.by?('· '+esc(p.by)):''}</span></div><span style="font-weight:600;">${money(p.amount)}</span></div>`).join('')}
+      recent.map(p=>`<div class="row-line">
+        <div style="display:flex;align-items:center;gap:8px;"><span>${p.direction==='in'?'⬇️':'⬆️'}</span><span>${esc(p.partyName)}</span><span class="muted" style="font-size:11px;">${fmtDate(p.date)} ${p.by?('· '+esc(p.by)):''}</span></div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-weight:600;">${money(p.amount)}</span>
+          ${isAdmin() ? `<button class="icon-btn edit" data-peditpay="${p.id}" style="padding:5px;">✏️</button><button class="icon-btn del" data-pdelpay="${p.id}" style="padding:5px;">🗑️</button>` : ``}
+        </div>
+      </div>`).join('')}
   </div>`;
 }
 function collectModal(party){
+  const balLabel = (party.balance||0) < 0 ? 'له (رصيد زيادة)' : 'المستحق الحالي';
   const html = `
   <div class="modal">
     <div class="modal-head"><h3>تسجيل تحصيل - ${esc(party.name)}</h3><button class="x-btn" data-close>✕</button></div>
     <div class="modal-body">
-      <p class="muted" style="font-size:13px;">المستحق الحالي: <b style="color:var(--brick);">${money(party.balance)}</b></p>
+      <p class="muted" style="font-size:13px;">${balLabel}: <b style="color:${(party.balance||0)<0?'var(--primary)':'var(--brick)'};">${money(Math.abs(party.balance||0))}</b></p>
       <label class="field"><span class="lbl">المبلغ</span><input id="c_amount" type="number" value="" autofocus></label>
       <label class="field"><span class="lbl">ملاحظات (اختياري)</span><input id="c_note" value=""></label>
+      <p class="muted" style="font-size:11px;">لو المبلغ أكبر من المستحق، الفرق هيتسجل كرصيد "له" عند العميل.</p>
       <button class="btn btn-primary" id="saveCollectBtn" style="width:100%;justify-content:center;margin-top:6px;">تأكيد التحصيل</button>
     </div>
   </div>`;
   const modal = openModal(html);
   modal.querySelector('[data-close]').addEventListener('click', ()=>closeModal(modal));
   modal.querySelector('#saveCollectBtn').addEventListener('click', async ()=>{
-    const amtRaw = +modal.querySelector('#c_amount').value;
-    if(!amtRaw || amtRaw<=0) return;
-    const amt = Math.min(amtRaw, party.balance);
-    state.parties = state.parties.map(p=>p.id===party.id?{...p, balance:p.balance-amt}:p);
+    const amt = +modal.querySelector('#c_amount').value;
+    if(!amt || amt<=0) return;
+    state.parties = state.parties.map(p=>p.id===party.id?{...p, balance:(p.balance||0)-amt}:p);
     state.payments.push({id:uid(), partyId:party.id, partyName:party.name, partyType:party.type, amount:amt, date:todayStr(), note:modal.querySelector('#c_note').value, direction: party.type==='customer'?'in':'out', by: currentUser.name});
     await persist('parties'); await persist('payments');
     closeModal(modal); render();
   });
 }
+function editPaymentModal(payment){
+  const html = `
+  <div class="modal">
+    <div class="modal-head"><h3>تعديل عملية ${payment.direction==='in'?'التحصيل':'الدفع'} - ${esc(payment.partyName)}</h3><button class="x-btn" data-close>✕</button></div>
+    <div class="modal-body">
+      <label class="field"><span class="lbl">المبلغ</span><input id="ep_amount" type="number" value="${payment.amount}" autofocus></label>
+      <label class="field"><span class="lbl">التاريخ</span><input id="ep_date" type="date" value="${payment.date}"></label>
+      <label class="field"><span class="lbl">ملاحظات</span><input id="ep_note" value="${esc(payment.note||'')}"></label>
+      <button class="btn btn-primary" id="saveEditPayBtn" style="width:100%;justify-content:center;margin-top:6px;">حفظ التعديل</button>
+    </div>
+  </div>`;
+  const modal = openModal(html);
+  modal.querySelector('[data-close]').addEventListener('click', ()=>closeModal(modal));
+  modal.querySelector('#saveEditPayBtn').addEventListener('click', async ()=>{
+    const newAmt = +modal.querySelector('#ep_amount').value;
+    if(!newAmt || newAmt<=0) return;
+    state.parties = state.parties.map(p=>p.id===payment.partyId?{...p, balance:(p.balance||0)+payment.amount}:p);
+    state.parties = state.parties.map(p=>p.id===payment.partyId?{...p, balance:(p.balance||0)-newAmt}:p);
+    const updated = {...payment, amount:newAmt, date: modal.querySelector('#ep_date').value||payment.date, note: modal.querySelector('#ep_note').value, editedBy: currentUser.name};
+    state.payments = state.payments.map(p=>p.id===payment.id?updated:p);
+    await persist('parties'); await persist('payments');
+    closeModal(modal); render();
+    showToast('تم تعديل العملية بنجاح');
+  });
+}
+async function deletePayment(payment){
+  if(!confirm('متأكد إنك عايز تحذف العملية دي؟ هيرجع تأثيرها على رصيد الطرف.')) return;
+  state.parties = state.parties.map(p=>p.id===payment.partyId?{...p, balance:(p.balance||0)+payment.amount}:p);
+  state.payments = state.payments.filter(p=>p.id!==payment.id);
+  await persist('parties'); await persist('payments');
+  render();
+  showToast('تم حذف العملية');
+}
 function bindCollections(){
   document.querySelectorAll('[data-collect]').forEach(b=>b.addEventListener('click', ()=>{ collectModal(state.parties.find(p=>p.id===b.dataset.collect)); }));
+  document.querySelectorAll('[data-peditpay]').forEach(b=>b.addEventListener('click', ()=>{ editPaymentModal(state.payments.find(p=>p.id===b.dataset.peditpay)); }));
+  document.querySelectorAll('[data-pdelpay]').forEach(b=>b.addEventListener('click', ()=>{ deletePayment(state.payments.find(p=>p.id===b.dataset.pdelpay)); }));
 }
 
 /* ---------------- Expenses (admin only) ---------------- */
