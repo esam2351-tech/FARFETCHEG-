@@ -153,9 +153,6 @@ const firebaseConfig = {
 };
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
-try{
-  db.enablePersistence({synchronizeTabs:true}).catch(err=>{ console.warn('Offline persistence not enabled:', err.code); });
-}catch(e){ console.warn('Offline persistence error:', e); }
 const DATA_COL = 'farfetch_data';
 
 async function loadShared(key, fallback){
@@ -214,11 +211,6 @@ function showToast(msg){
   const t = document.createElement('div'); t.className='toast'; t.textContent = msg;
   document.body.appendChild(t);
   setTimeout(()=>t.remove(), 2600);
-}
-function updateOnlineStatus(){
-  const banner = document.getElementById('offlineBanner');
-  if(!banner) return;
-  banner.style.display = navigator.onLine ? 'none' : 'block';
 }
 
 /* ---------------- Install to home screen ---------------- */
@@ -419,11 +411,7 @@ function renderApp(){
       </header>
       <div class="content" id="content"></div>
     </div>
-  </div>
-  <div id="offlineBanner" style="display:none;position:fixed;bottom:0;right:0;left:0;background:var(--gold);color:#fff;text-align:center;padding:8px;font-size:12px;font-weight:700;z-index:90;">📡 مفيش اتصال بالإنترنت — البيانات بتتحفظ عندك وهتتزامن تلقائي أول ما النت يرجع</div>`;
-  updateOnlineStatus();
-  window.addEventListener('online', updateOnlineStatus);
-  window.addEventListener('offline', updateOnlineStatus);
+  </div>`;
   document.getElementById('dateNow').textContent = fmtDate(todayStr());
   document.getElementById('menuBtn').addEventListener('click', openSidebar);
   document.getElementById('overlay').addEventListener('click', closeSidebar);
