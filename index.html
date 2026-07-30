@@ -165,7 +165,12 @@ async function loadShared(key, fallback){
   }catch(e){ console.error('loadShared', key, e); return fallback; }
 }
 async function saveShared(key, val){
-  try{ await db.collection(DATA_COL).doc(key).set({list: val}); }
+  try{
+    // Don't await the network round-trip: Firestore already commits this to its local
+    // offline cache synchronously, so the UI can proceed immediately. The write itself
+    // keeps syncing to the server in the background once connectivity returns.
+    db.collection(DATA_COL).doc(key).set({list: val}).catch(err=>{ console.warn('saveShared background sync error', key, err); });
+  }
   catch(e){ console.error('saveShared', key, e); }
 }
 function subscribeShared(key, onChange){
