@@ -190,9 +190,9 @@ if('serviceWorker' in navigator){
   window.addEventListener('load', ()=>{ navigator.serviceWorker.register('./sw.js').catch(()=>{}); });
 }
 
-const KEYS = {items:'biz_items', parties:'biz_parties', invoices:'biz_invoices', payments:'biz_payments', adjustments:'biz_adjustments', users:'biz_users', expenses:'biz_expenses', returns:'biz_returns'};
+const KEYS = {items:'biz_items', parties:'biz_parties', invoices:'biz_invoices', payments:'biz_payments', adjustments:'biz_adjustments', users:'biz_users', expenses:'biz_expenses', returns:'biz_returns', deposits:'biz_deposits'};
 
-let state = { items:[], parties:[], invoices:[], payments:[], adjustments:[], users:[], expenses:[], returns:[], view:'dashboard' };
+let state = { items:[], parties:[], invoices:[], payments:[], adjustments:[], users:[], expenses:[], returns:[], deposits:[], view:'dashboard' };
 let currentUser = null; // {id,name,role}
 
 async function persist(part){ await saveShared(KEYS[part], state[part]); }
@@ -285,7 +285,7 @@ const root = document.getElementById('root');
 /* ================= Boot ================= */
 (async function boot(){
   try{
-    const [items, parties, invoices, payments, adjustments, users, expenses, returns] = await Promise.all([
+    const [items, parties, invoices, payments, adjustments, users, expenses, returns, deposits] = await Promise.all([
       loadShared(KEYS.items, []),
       loadShared(KEYS.parties, []),
       loadShared(KEYS.invoices, []),
@@ -294,9 +294,10 @@ const root = document.getElementById('root');
       loadShared(KEYS.users, []),
       loadShared(KEYS.expenses, []),
       loadShared(KEYS.returns, []),
+      loadShared(KEYS.deposits, []),
     ]);
     state.items=items; state.parties=parties; state.invoices=invoices;
-    state.payments=payments; state.adjustments=adjustments; state.users=users; state.expenses=expenses; state.returns=returns;
+    state.payments=payments; state.adjustments=adjustments; state.users=users; state.expenses=expenses; state.returns=returns; state.deposits=deposits;
     attachLiveSync();
     const savedSession = loadPersonal('farfetch_session', null);
     if(savedSession){
@@ -389,6 +390,7 @@ function navItemsFor(){
     {key:'parties', label:'العملاء والموردين', ic:'👥', roles:['admin','rep']},
     {key:'collections', label:'التحصيلات والآجل', ic:'💰', roles:['admin','rep']},
     {key:'returns', label:'المرتجعات', ic:'↩️', roles:['admin','rep']},
+    {key:'deposits', label:'توريدات البنك', ic:'🏦', roles:['admin','rep']},
     {key:'expenses', label:'المصروفات', ic:'💸', roles:['admin']},
     {key:'reports', label:'التقارير', ic:'📊', roles:['admin']},
     {key:'users', label:'المستخدمين', ic:'🔑', roles:['admin']},
@@ -671,6 +673,7 @@ const DASHBOARD_TILES = [
   {key:'parties', label:'العملاء والموردين', ic:'👥', color:'#0F5C4F'},
   {key:'collections', label:'التحصيلات والآجل', ic:'💰', color:'#A8462E'},
   {key:'returns', label:'المرتجعات', ic:'↩️', color:'#6E7A73'},
+  {key:'deposits', label:'توريدات البنك', ic:'🏦', color:'#0F5C4F'},
   {key:'audit', label:'الجرد', ic:'🧮', color:'#0A4239'},
   {key:'expenses', label:'المصروفات', ic:'💸', color:'#A8462E'},
   {key:'reports', label:'التقارير', ic:'📊', color:'#0F5C4F'},
@@ -1554,6 +1557,104 @@ function bindCollections(){
   document.querySelectorAll('[data-pdelpay]').forEach(b=>b.addEventListener('click', ()=>{ deletePayment(state.payments.find(p=>p.id===b.dataset.pdelpay)); }));
 }
 
+/* ---------------- Bank Deposits (توريدات البنك) ---------------- */
+function repCashSummary(repName){
+  const collected = state.payments.filter(p=>p.direction==='in' && p.by===repName).reduce((s,p)=>s+p.amount,0)
+    + state.invoices.filter(v=>v.type==='sell' && v.createdBy===repName).reduce((s,v)=>s+(v.paid||0),0);
+  const deposited = state.deposits.filter(d=>d.userName===repName).reduce((s,d)=>s+d.amount,0);
+  return { collected, deposited, remaining: collected - deposited };
+}
+function renderDeposits(){
+  if(!isAdmin()){
+    const sum = repCashSummary(currentUser.name);
+    const myDeposits = [...state.deposits].filter(d=>d.userName===currentUser.name).sort((a,b)=>a.date<b.date?1:-1);
+    return `
+    <div class="grid-stats" style="grid-template-columns:1fr 1fr 1fr;">
+      <div class="card"><div class="stat-label">إجمالي المحصّل</div><div class="stat-value" style="color:var(--primary);">${money(sum.collected)}</div></div>
+      <div class="card"><div class="stat-label">إجمالي المورّد للبنك</div><div class="stat-value" style="color:var(--gold);">${money(sum.deposited)}</div></div>
+      <div class="card"><div class="stat-label">متبقي معايا</div><div class="stat-value" style="color:${sum.remaining>0?'var(--brick)':'var(--primary)'};">${money(sum.remaining)}</div></div>
+    </div>
+    <div class="toolbar" style="margin-top:16px;">
+      <p class="muted" style="font-size:13px;margin:0;">سجّل المبلغ اللي وردته للبنك من الفلوس اللي معاك.</p>
+      <button class="btn btn-primary" id="addDepositBtn">+ تسجيل توريد</button>
+    </div>
+    <div class="card">
+      <h3 class="section-title">توريداتي</h3>
+      ${myDeposits.length===0 ? `<p class="muted" style="font-size:14px;">لسه ما ورّدتش حاجة.</p>` :
+        myDeposits.map(d=>`<div class="row-line"><div><div style="font-weight:600;">${money(d.amount)}</div><div class="muted" style="font-size:11px;">${fmtDate(d.date)} ${d.note?('· '+esc(d.note)):''}</div></div></div>`).join('')}
+    </div>`;
+  }
+  const reps = state.users.filter(u=>u.role==='rep' || u.role==='admin');
+  const summaries = reps.map(u=>({name:u.name, ...repCashSummary(u.name)}));
+  const allDeposits = [...state.deposits].sort((a,b)=>a.date<b.date?1:-1);
+  return `
+  <div class="toolbar">
+    <p class="muted" style="font-size:13px;margin:0;">متابعة الفلوس اللي مع كل مندوب: اللي حصّله، اللي ورّده للبنك، والباقي معاه.</p>
+    <button class="btn btn-primary" id="addDepositBtn">+ تسجيل توريد</button>
+  </div>
+  <div class="card" style="padding:0;">
+    <div class="table-wrap"><table>
+      <thead><tr><th>المندوب</th><th>حصّل</th><th>ورّد للبنك</th><th>متبقي معاه</th></tr></thead>
+      <tbody>
+      ${summaries.map(s=>`<tr>
+        <td style="font-weight:600;">${esc(s.name)}</td>
+        <td class="muted">${money(s.collected)}</td>
+        <td style="color:var(--gold);font-weight:700;">${money(s.deposited)}</td>
+        <td style="font-weight:800;color:${s.remaining>0?'var(--brick)':'var(--primary)'};">${money(s.remaining)}</td>
+      </tr>`).join('') || `<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:16px;">لا يوجد مندوبين مسجلين</td></tr>`}
+      </tbody>
+    </table></div>
+  </div>
+  <div class="card" style="margin-top:18px;">
+    <h3 class="section-title">سجل التوريدات</h3>
+    ${allDeposits.length===0 ? `<p class="muted" style="font-size:14px;">لا توجد توريدات مسجلة بعد.</p>` :
+      allDeposits.map(d=>`<div class="row-line">
+        <div><div style="font-weight:600;">${esc(d.userName)}</div><div class="muted" style="font-size:11px;">${fmtDate(d.date)} ${d.note?('· '+esc(d.note)):''}</div></div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-weight:700;color:var(--gold);">${money(d.amount)}</span>
+          <button class="icon-btn del" data-deldeposit="${d.id}" style="padding:5px;">🗑️</button>
+        </div>
+      </div>`).join('')}
+  </div>`;
+}
+function depositModal(){
+  const reps = state.users.filter(u=>u.role==='rep' || u.role==='admin');
+  const isRepView = !isAdmin();
+  const html = `
+  <div class="modal">
+    <div class="modal-head"><h3>تسجيل توريد للبنك</h3><button class="x-btn" data-close>✕</button></div>
+    <div class="modal-body">
+      ${isRepView ? `<p class="muted" style="font-size:13px;">هيتسجل باسمك: <b>${esc(currentUser.name)}</b></p>` : `
+      <label class="field"><span class="lbl">المندوب</span><select id="dep_user">${reps.map(u=>`<option value="${esc(u.name)}">${esc(u.name)}</option>`).join('')}</select></label>`}
+      <label class="field"><span class="lbl">المبلغ</span><input id="dep_amount" type="number" autofocus></label>
+      <label class="field"><span class="lbl">التاريخ</span><input id="dep_date" type="date" value="${todayStr()}"></label>
+      <label class="field"><span class="lbl">ملاحظات (اختياري)</span><input id="dep_note"></label>
+      <button class="btn btn-primary" id="saveDepositBtn" style="width:100%;justify-content:center;margin-top:6px;">حفظ التوريد</button>
+    </div>
+  </div>`;
+  const modal = openModal(html);
+  modal.querySelector('[data-close]').addEventListener('click', ()=>closeModal(modal));
+  modal.querySelector('#saveDepositBtn').addEventListener('click', async ()=>{
+    const amount = +modal.querySelector('#dep_amount').value;
+    if(!amount || amount<=0) return;
+    const userName = isRepView ? currentUser.name : modal.querySelector('#dep_user').value;
+    state.deposits.push({id:uid(), userName, amount, date: modal.querySelector('#dep_date').value||todayStr(), note: modal.querySelector('#dep_note').value, by: currentUser.name});
+    await persist('deposits');
+    closeModal(modal); render();
+    showToast('تم تسجيل التوريد ✅');
+  });
+}
+function bindDeposits(){
+  const addBtn = document.getElementById('addDepositBtn');
+  if(addBtn) addBtn.addEventListener('click', depositModal);
+  document.querySelectorAll('[data-deldeposit]').forEach(b=>b.addEventListener('click', async ()=>{
+    if(!confirm('متأكد إنك عايز تحذف التوريد ده؟')) return;
+    state.deposits = state.deposits.filter(d=>d.id!==b.dataset.deldeposit);
+    await persist('deposits');
+    render();
+  }));
+}
+
 /* ---------------- Returns (المرتجعات) ---------------- */
 function renderReturns(){
   const list = [...state.returns].sort((a,b)=>a.date<b.date?1:-1);
@@ -2018,7 +2119,7 @@ function render(){
   }
   if(!document.getElementById('sidebar')){ renderApp(); return; }
   renderNav();
-  const titleMap = {dashboard:'الرئيسية', inventory:'المخزون', audit:'الجرد', invoices:'الفواتير', parties:'العملاء والموردين', collections:'التحصيلات والآجل', returns:'المرتجعات', expenses:'المصروفات', reports:'التقارير', users:'المستخدمين', backup:'النسخ الاحتياطي'};
+  const titleMap = {dashboard:'الرئيسية', inventory:'المخزون', audit:'الجرد', invoices:'الفواتير', parties:'العملاء والموردين', collections:'التحصيلات والآجل', returns:'المرتجعات', deposits:'توريدات البنك', expenses:'المصروفات', reports:'التقارير', users:'المستخدمين', backup:'النسخ الاحتياطي'};
   document.getElementById('pageTitle').textContent = titleMap[state.view] || '';
   const content = document.getElementById('content');
   const allowed = navItemsFor().map(n=>n.key);
@@ -2030,6 +2131,7 @@ function render(){
   else if(state.view==='parties'){ content.innerHTML = renderParties(); bindParties(); }
   else if(state.view==='collections'){ content.innerHTML = renderCollections(); bindCollections(); }
   else if(state.view==='returns'){ content.innerHTML = renderReturns(); bindReturns(); }
+  else if(state.view==='deposits'){ content.innerHTML = renderDeposits(); bindDeposits(); }
   else if(state.view==='expenses'){ content.innerHTML = renderExpenses(); bindExpenses(); }
   else if(state.view==='reports'){ content.innerHTML = renderReports(); bindReports(); }
   else if(state.view==='users'){ content.innerHTML = renderUsers(); bindUsers(); }
