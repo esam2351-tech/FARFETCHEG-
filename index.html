@@ -1420,14 +1420,69 @@ function renderParties(){
   ${list.length===0 ? `<div class="empty"><div class="circle">👥</div><p>لا يوجد ${partyTab==='customer'?'عملاء':'موردين'} بعد.</p></div>` :
   `<div class="grid2" style="grid-template-columns:repeat(auto-fill,minmax(240px,1fr));">${list.map(p=>`
     <div class="card party-card">
-      <div>
-        <div style="font-weight:600;">${esc(p.name)}</div>
+      <div data-pstatement="${p.id}" style="cursor:pointer;flex:1;">
+        <div style="font-weight:600;">${esc(p.name)} <span style="font-size:11px;color:var(--primary);">📄 كشف حساب</span></div>
         <div class="muted" style="font-size:12px;">${esc(p.phone||'بدون رقم')}</div>
         <div style="font-weight:600;font-size:14px;margin-top:4px;color:${p.balance>0?'var(--brick)':(p.balance<0?'var(--primary)':'var(--muted)')};">${p.balance>0?('مستحق: '+money(p.balance)) : (p.balance<0?('له: '+money(Math.abs(p.balance))) : 'لا يوجد مستحقات')}</div>
       </div>
       ${isAdmin() ? `<div style="display:flex;gap:6px;"><button class="icon-btn edit" data-pedit="${p.id}">✏️</button><button class="icon-btn del" data-pdel="${p.id}">🗑️</button></div>` : ''}
     </div>`).join('')}</div>`}
   `;
+}
+function partyStatementModal(party){
+  const invoicesForParty = state.invoices.filter(v=>v.partyId===party.id).sort((a,b)=>a.date<b.date?1:-1);
+  const paymentsForParty = state.payments.filter(p=>p.partyId===party.id).sort((a,b)=>a.date<b.date?1:-1);
+  const returnsForParty = state.returns.filter(r=>r.partyId===party.id).sort((a,b)=>a.date<b.date?1:-1);
+  const html = `
+  <div class="modal wide">
+    <div class="modal-head"><h3>📄 كشف حساب - ${esc(party.name)}</h3><button class="x-btn" data-close>✕</button></div>
+    <div class="modal-body">
+      <div class="card" style="margin-bottom:16px;">
+        <div class="muted" style="font-size:12px;">${esc(party.phone||'بدون رقم')}</div>
+        <div style="font-weight:800;font-size:20px;margin-top:6px;color:${party.balance>0?'var(--brick)':(party.balance<0?'var(--primary)':'var(--muted)')};">
+          ${party.balance>0?('مستحق: '+money(party.balance)) : (party.balance<0?('له: '+money(Math.abs(party.balance))) : 'لا يوجد مستحقات')}
+        </div>
+      </div>
+
+      <h3 class="section-title">🧾 الفواتير (${invoicesForParty.length})</h3>
+      ${invoicesForParty.length===0 ? `<p class="muted" style="font-size:13px;">لا توجد فواتير.</p>` : `
+      <div class="table-wrap" style="margin-bottom:18px;"><table>
+        <thead><tr><th>التاريخ</th><th>رقم الفاتورة</th><th>الإجمالي</th><th>المدفوع</th><th>المتبقي</th></tr></thead>
+        <tbody>${invoicesForParty.map(v=>`<tr>
+          <td class="muted">${fmtDate(v.date)}</td>
+          <td class="muted" style="direction:ltr;">${esc(v.invoiceNumber||'—')}</td>
+          <td style="font-weight:700;">${money(v.total)}</td>
+          <td class="muted">${money(v.paid)}</td>
+          <td style="font-weight:700;color:${v.due>0?'var(--brick)':'var(--primary)'};">${money(v.due)}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>`}
+
+      <h3 class="section-title">💰 التحصيلات والدفعات (${paymentsForParty.length})</h3>
+      ${paymentsForParty.length===0 ? `<p class="muted" style="font-size:13px;">لا توجد عمليات تحصيل.</p>` : `
+      <div class="table-wrap" style="margin-bottom:18px;"><table>
+        <thead><tr><th>التاريخ</th><th>المبلغ</th><th>ملاحظات</th><th>بواسطة</th></tr></thead>
+        <tbody>${paymentsForParty.map(p=>`<tr>
+          <td class="muted">${fmtDate(p.date)}</td>
+          <td style="font-weight:700;color:var(--primary);">${money(p.amount)}</td>
+          <td class="muted">${esc(p.note||'—')}</td>
+          <td class="muted">${esc(p.by||'—')}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>`}
+
+      ${returnsForParty.length>0 ? `
+      <h3 class="section-title">↩️ المرتجعات (${returnsForParty.length})</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>التاريخ</th><th>القيمة</th><th>عدد الأصناف</th></tr></thead>
+        <tbody>${returnsForParty.map(r=>`<tr>
+          <td class="muted">${fmtDate(r.date)}</td>
+          <td style="font-weight:700;color:var(--brick);">${money(r.total)}</td>
+          <td class="muted">${r.lines.length}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>` : ``}
+    </div>
+  </div>`;
+  const modal = openModal(html);
+  modal.querySelector('[data-close]').addEventListener('click', ()=>closeModal(modal));
 }
 function partyModal(party){
   const isNew = !party;
@@ -1457,8 +1512,9 @@ function bindParties(){
   document.querySelectorAll('[data-ptab]').forEach(b=>b.addEventListener('click', ()=>{ partyTab=b.dataset.ptab; render(); }));
   const addBtn = document.getElementById('addPartyBtn');
   if(addBtn) addBtn.addEventListener('click', ()=>partyModal(null));
-  document.querySelectorAll('[data-pedit]').forEach(b=>b.addEventListener('click', ()=>{ partyModal(state.parties.find(p=>p.id===b.dataset.pedit)); }));
-  document.querySelectorAll('[data-pdel]').forEach(b=>b.addEventListener('click', async ()=>{ state.parties = state.parties.filter(p=>p.id!==b.dataset.pdel); await persist('parties'); render(); }));
+  document.querySelectorAll('[data-pstatement]').forEach(el=>el.addEventListener('click', ()=>{ partyStatementModal(state.parties.find(p=>p.id===el.dataset.pstatement)); }));
+  document.querySelectorAll('[data-pedit]').forEach(b=>b.addEventListener('click', (e)=>{ e.stopPropagation(); partyModal(state.parties.find(p=>p.id===b.dataset.pedit)); }));
+  document.querySelectorAll('[data-pdel]').forEach(b=>b.addEventListener('click', async (e)=>{ e.stopPropagation(); state.parties = state.parties.filter(p=>p.id!==b.dataset.pdel); await persist('parties'); render(); }));
 }
 
 /* ---------------- Collections ---------------- */
