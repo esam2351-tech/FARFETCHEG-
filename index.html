@@ -211,7 +211,13 @@ function attachLiveSync(){
 const UNITS = ["قطعة","كرتونة","كيلو","لتر","متر","علبة"];
 const uid = () => Math.random().toString(36).slice(2,10) + Date.now().toString(36);
 const money = n => (Math.round((Number(n)||0)*100)/100).toLocaleString('ar-EG',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' ج.م';
-const todayStr = () => new Date().toISOString().slice(0,10);
+function localDateStr(d){
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const day = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+const todayStr = () => localDateStr(new Date());
 const fmtDate = d => new Date(d).toLocaleDateString('ar-EG',{day:'numeric',month:'short',year:'numeric'});
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 function isAdmin(){ return currentUser && currentUser.role==='admin'; }
@@ -1890,11 +1896,11 @@ function bindExpenses(){
 let reportsPreset = 'month';
 let reportsFrom = null, reportsTo = null;
 function reportsRange(){
-  const today = new Date(todayStr());
+  const today = new Date(todayStr()+'T00:00:00');
   let from, to;
   if(reportsPreset==='today'){ from = todayStr(); to = todayStr(); }
-  else if(reportsPreset==='week'){ const d=new Date(today); d.setDate(d.getDate()-6); from=d.toISOString().slice(0,10); to=todayStr(); }
-  else if(reportsPreset==='month'){ const d=new Date(today.getFullYear(), today.getMonth(), 1); from=d.toISOString().slice(0,10); to=todayStr(); }
+  else if(reportsPreset==='week'){ const d=new Date(today); d.setDate(d.getDate()-6); from=localDateStr(d); to=todayStr(); }
+  else if(reportsPreset==='month'){ const d=new Date(today.getFullYear(), today.getMonth(), 1); from=localDateStr(d); to=todayStr(); }
   else if(reportsPreset==='all'){ from='0000-01-01'; to='9999-12-31'; }
   else { from = reportsFrom||'0000-01-01'; to = reportsTo||'9999-12-31'; }
   return {from, to};
@@ -1920,6 +1926,7 @@ function renderReports(){
     bestMap[l.itemName].revenue += l.qty*l.price;
   }));
   const bestSellers = Object.values(bestMap).sort((a,b)=>b.qty-a.qty).slice(0,10);
+  const totalPiecesSold = sellInvoices.reduce((s,v)=> s + v.lines.reduce((s2,l)=>s2+(+l.qty||0),0), 0);
 
   const paymentsInRange = state.payments.filter(p=>p.date>=from && p.date<=to).sort((a,b)=>a.date<b.date?1:-1);
   const totalCollected = paymentsInRange.filter(p=>p.direction==='in').reduce((s,p)=>s+p.amount,0);
@@ -1945,6 +1952,7 @@ function renderReports(){
 
   <div class="grid-stats">
     <div class="card"><div class="stat-top"><span class="stat-label">المبيعات</span><div class="stat-icon" style="background:#0F5C4F22;color:#0F5C4F;">🧾</div></div><div class="stat-value">${money(revenue)}</div><div class="stat-sub">${sellInvoices.length} فاتورة</div></div>
+    <div class="card"><div class="stat-top"><span class="stat-label">عدد القطع المباعة</span><div class="stat-icon" style="background:#C79A2E22;color:#C79A2E;">👕</div></div><div class="stat-value">${totalPiecesSold}</div></div>
     <div class="card"><div class="stat-top"><span class="stat-label">تكلفة البضاعة المباعة</span><div class="stat-icon" style="background:#A8462E22;color:#A8462E;">📦</div></div><div class="stat-value">${money(cogs)}</div></div>
     <div class="card"><div class="stat-top"><span class="stat-label">مجمل الربح</span><div class="stat-icon" style="background:#C79A2E22;color:#C79A2E;">📈</div></div><div class="stat-value">${money(grossProfit)}</div></div>
     <div class="card"><div class="stat-top"><span class="stat-label">المصروفات</span><div class="stat-icon" style="background:#A8462E22;color:#A8462E;">💸</div></div><div class="stat-value">${money(totalExpenses)}</div></div>
@@ -2032,6 +2040,7 @@ function printReport(){
       <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:20px;">
         <tbody>
           <tr><td style="padding:8px;border-bottom:1px solid #E4DFD1;">المبيعات (${sellInvoices.length} فاتورة)</td><td style="padding:8px;border-bottom:1px solid #E4DFD1;text-align:left;font-weight:800;">${money(revenue)}</td></tr>
+          <tr><td style="padding:8px;border-bottom:1px solid #E4DFD1;">عدد القطع المباعة</td><td style="padding:8px;border-bottom:1px solid #E4DFD1;text-align:left;font-weight:800;">${sellInvoices.reduce((s,v)=> s + v.lines.reduce((s2,l)=>s2+(+l.qty||0),0), 0)}</td></tr>
           <tr><td style="padding:8px;border-bottom:1px solid #E4DFD1;">تكلفة البضاعة المباعة</td><td style="padding:8px;border-bottom:1px solid #E4DFD1;text-align:left;font-weight:800;color:#A8462E;">${money(cogs)}</td></tr>
           <tr><td style="padding:8px;border-bottom:1px solid #E4DFD1;">مجمل الربح</td><td style="padding:8px;border-bottom:1px solid #E4DFD1;text-align:left;font-weight:800;color:#C79A2E;">${money(grossProfit)}</td></tr>
           <tr><td style="padding:8px;border-bottom:1px solid #E4DFD1;">المصروفات</td><td style="padding:8px;border-bottom:1px solid #E4DFD1;text-align:left;font-weight:800;color:#A8462E;">${money(totalExpenses)}</td></tr>
