@@ -190,9 +190,9 @@ if('serviceWorker' in navigator){
   window.addEventListener('load', ()=>{ navigator.serviceWorker.register('./sw.js').catch(()=>{}); });
 }
 
-const KEYS = {items:'biz_items', parties:'biz_parties', invoices:'biz_invoices', payments:'biz_payments', adjustments:'biz_adjustments', users:'biz_users', expenses:'biz_expenses', returns:'biz_returns', deposits:'biz_deposits'};
+const KEYS = {items:'biz_items', parties:'biz_parties', invoices:'biz_invoices', payments:'biz_payments', adjustments:'biz_adjustments', users:'biz_users', expenses:'biz_expenses', returns:'biz_returns', deposits:'biz_deposits', purchases:'biz_purchases'};
 
-let state = { items:[], parties:[], invoices:[], payments:[], adjustments:[], users:[], expenses:[], returns:[], deposits:[], view:'dashboard' };
+let state = { items:[], parties:[], invoices:[], payments:[], adjustments:[], users:[], expenses:[], returns:[], deposits:[], purchases:[], view:'dashboard' };
 let currentUser = null; // {id,name,role}
 
 async function persist(part){ await saveShared(KEYS[part], state[part]); }
@@ -291,7 +291,7 @@ const root = document.getElementById('root');
 /* ================= Boot ================= */
 (async function boot(){
   try{
-    const [items, parties, invoices, payments, adjustments, users, expenses, returns, deposits] = await Promise.all([
+    const [items, parties, invoices, payments, adjustments, users, expenses, returns, deposits, purchases] = await Promise.all([
       loadShared(KEYS.items, []),
       loadShared(KEYS.parties, []),
       loadShared(KEYS.invoices, []),
@@ -301,9 +301,10 @@ const root = document.getElementById('root');
       loadShared(KEYS.expenses, []),
       loadShared(KEYS.returns, []),
       loadShared(KEYS.deposits, []),
+      loadShared(KEYS.purchases, []),
     ]);
     state.items=items; state.parties=parties; state.invoices=invoices;
-    state.payments=payments; state.adjustments=adjustments; state.users=users; state.expenses=expenses; state.returns=returns; state.deposits=deposits;
+    state.payments=payments; state.adjustments=adjustments; state.users=users; state.expenses=expenses; state.returns=returns; state.deposits=deposits; state.purchases=purchases;
     attachLiveSync();
     const savedSession = loadPersonal('farfetch_session', null);
     if(savedSession){
@@ -392,6 +393,7 @@ function navItemsFor(){
     {key:'pos', label:'نقطة البيع', ic:'🛒', roles:['admin','rep']},
     {key:'inventory', label:'المخزون', ic:'📦', roles:['admin']},
     {key:'audit', label:'الجرد', ic:'🧮', roles:['admin']},
+    {key:'purchases', label:'المشتريات', ic:'📥', roles:['admin']},
     {key:'invoices', label:'الفواتير', ic:'🧾', roles:['admin','rep']},
     {key:'parties', label:'العملاء والموردين', ic:'👥', roles:['admin','rep']},
     {key:'collections', label:'التحصيلات والآجل', ic:'💰', roles:['admin','rep']},
@@ -681,6 +683,7 @@ const DASHBOARD_TILES = [
   {key:'returns', label:'المرتجعات', ic:'↩️', color:'#6E7A73'},
   {key:'deposits', label:'توريدات البنك', ic:'🏦', color:'#0F5C4F'},
   {key:'audit', label:'الجرد', ic:'🧮', color:'#0A4239'},
+  {key:'purchases', label:'المشتريات', ic:'📥', color:'#0A4239'},
   {key:'expenses', label:'المصروفات', ic:'💸', color:'#A8462E'},
   {key:'reports', label:'التقارير', ic:'📊', color:'#0F5C4F'},
   {key:'users', label:'المستخدمين', ic:'🔑', color:'#C79A2E'},
@@ -1717,6 +1720,104 @@ function bindDeposits(){
   }));
 }
 
+/* ---------------- Purchases list (المشتريات) - adds to stock only, no money involved ---------------- */
+function renderPurchases(){
+  const list = [...state.purchases].sort((a,b)=>a.date<b.date?1:-1);
+  return `
+  <div class="toolbar">
+    <p class="muted" style="font-size:13px;margin:0;">تسجيل مشتريات بيزوّد كمية الأصناف في المخزون بس، من غير أي تأثير على الفلوس أو حسابات الموردين.</p>
+    <button class="btn btn-primary" id="addPurchaseBtn">+ مشتريات جديدة</button>
+  </div>
+  ${list.length===0 ? `<div class="empty"><div class="circle">📥</div><p>لا توجد مشتريات مسجلة بعد.</p></div>` :
+    `<div class="list-gap">${list.map(p=>`
+    <div class="card" style="padding:12px 14px;">
+      <div style="font-weight:700;font-size:14px;">${p.lines.length} صنف</div>
+      <div class="muted" style="font-size:11px;margin-top:2px;">${fmtDate(p.date)} ${p.createdBy?('· '+esc(p.createdBy)):''} ${p.note?('· '+esc(p.note)):''}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">
+        ${p.lines.map(l=>`<span class="badge admin">${esc(l.itemName)} +${l.qty} @ ${money(l.price||0)}</span>`).join('')}
+      </div>
+      ${isAdmin() ? `<div style="text-align:left;margin-top:8px;"><button class="icon-btn del" data-delpurchase="${p.id}" style="padding:5px;">🗑️</button></div>` : ``}
+    </div>`).join('')}</div>`}
+  `;
+}
+function purchaseModal(){
+  let lines = [];
+  const html = `
+  <div class="modal wide">
+    <div class="modal-head"><h3>مشتريات جديدة (زيادة مخزون)</h3><button class="x-btn" data-close>✕</button></div>
+    <div class="modal-body">
+      <label class="field"><span class="lbl">التاريخ</span><input id="pur_date" type="date" value="${todayStr()}"></label>
+      <label class="field"><span class="lbl">ملاحظات (اختياري)</span><input id="pur_note" placeholder="مثال: اسم المورد أو أي ملاحظة"></label>
+      <p class="muted" style="font-size:11px;margin-top:-4px;">سعر الشراء هنا بيحدّث تكلفة الصنف بس، ومش بيخصم أي فلوس ولا بيسجل أي مصروف.</p>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin:8px 0;">
+        <span class="muted" style="font-size:12px;font-weight:600;">الأصناف</span>
+        <button class="btn" id="addPurLineBtn" style="background:var(--primarySoft);color:var(--primary);padding:6px 12px;font-size:12px;">+ إضافة صنف</button>
+      </div>
+      <div id="purLinesWrap"></div>
+      <button class="btn btn-primary" id="savePurchaseBtn" style="width:100%;justify-content:center;margin-top:10px;">حفظ المشتريات</button>
+    </div>
+  </div>`;
+  const modal = openModal(html);
+  modal.querySelector('[data-close]').addEventListener('click', ()=>closeModal(modal));
+  function priceFor(itemId){ const it = state.items.find(i=>i.id===itemId); return it ? it.buyPrice : 0; }
+  function renderPurLines(){
+    const wrap = modal.querySelector('#purLinesWrap');
+    wrap.innerHTML = lines.length===0 ? `<p class="muted" style="font-size:12px;">لا توجد أصناف مضافة بعد.</p>` : lines.map((l,idx)=>`
+      <div class="line-item" data-idx="${idx}">
+        <select class="ln-item">${state.items.map(i=>`<option value="${i.id}" ${i.id===l.itemId?'selected':''}>${esc(i.name)}</option>`).join('')}</select>
+        <div class="line-item-row2">
+          <div style="flex:1;"><span class="ln-label">الكمية المضافة</span><input class="ln-qty" type="number" inputmode="decimal" value="${l.qty}"></div>
+          <div style="flex:1;"><span class="ln-label">سعر الشراء</span><input class="ln-price" type="number" inputmode="decimal" value="${l.price}"></div>
+          <button class="ln-del">🗑️</button>
+        </div>
+      </div>`).join('');
+    wrap.querySelectorAll('.line-item').forEach(row=>{
+      const idx = +row.dataset.idx;
+      row.querySelector('.ln-item').addEventListener('change', e=>{ lines[idx].itemId=e.target.value; lines[idx].price=priceFor(e.target.value); renderPurLines(); });
+      row.querySelector('.ln-qty').addEventListener('input', e=>{ lines[idx].qty=+e.target.value; });
+      row.querySelector('.ln-price').addEventListener('input', e=>{ lines[idx].price=+e.target.value; });
+      row.querySelector('.ln-del').addEventListener('click', ()=>{ lines.splice(idx,1); renderPurLines(); });
+    });
+  }
+  modal.querySelector('#addPurLineBtn').addEventListener('click', ()=>{
+    const first = state.items[0]; if(!first) return;
+    lines.push({itemId:first.id, qty:1, price:priceFor(first.id)});
+    renderPurLines();
+  });
+  renderPurLines();
+  modal.querySelector('#savePurchaseBtn').addEventListener('click', async ()=>{
+    if(lines.length===0) return;
+    const purchase = {
+      id: uid(), date: modal.querySelector('#pur_date').value || todayStr(),
+      note: modal.querySelector('#pur_note').value,
+      lines: lines.map(l=>({itemId:l.itemId, qty:l.qty, price:l.price, itemName: state.items.find(i=>i.id===l.itemId)?.name || ''})),
+      createdBy: currentUser.name, createdById: currentUser.id,
+    };
+    purchase.lines.forEach(l=>{
+      state.items = state.items.map(it => it.id===l.itemId ? {...it, qty: it.qty + (+l.qty||0), buyPrice: (+l.price||it.buyPrice)} : it);
+    });
+    state.purchases.push(purchase);
+    await persist('items'); await persist('purchases');
+    closeModal(modal); render();
+    showToast('تم تسجيل المشتريات وتحديث المخزون ✅');
+  });
+}
+async function deletePurchase(purchase){
+  if(!confirm('متأكد إنك عايز تحذف المشتريات دي؟ هيرجع تأثيرها على المخزون (تقليل الكمية).')) return;
+  purchase.lines.forEach(l=>{ state.items = state.items.map(it => it.id===l.itemId ? {...it, qty: it.qty - (+l.qty||0)} : it); });
+  state.purchases = state.purchases.filter(p=>p.id!==purchase.id);
+  await persist('items'); await persist('purchases');
+  render();
+  showToast('تم حذف المشتريات');
+}
+function bindPurchases(){
+  const addBtn = document.getElementById('addPurchaseBtn');
+  if(addBtn) addBtn.addEventListener('click', purchaseModal);
+  document.querySelectorAll('[data-delpurchase]').forEach(b=>b.addEventListener('click', ()=>{
+    deletePurchase(state.purchases.find(p=>p.id===b.dataset.delpurchase));
+  }));
+}
+
 /* ---------------- Returns (المرتجعات) ---------------- */
 function renderReturns(){
   const list = [...state.returns].sort((a,b)=>a.date<b.date?1:-1);
@@ -2184,7 +2285,7 @@ function render(){
   }
   if(!document.getElementById('sidebar')){ renderApp(); return; }
   renderNav();
-  const titleMap = {dashboard:'الرئيسية', inventory:'المخزون', audit:'الجرد', invoices:'الفواتير', parties:'العملاء والموردين', collections:'التحصيلات والآجل', returns:'المرتجعات', deposits:'توريدات البنك', expenses:'المصروفات', reports:'التقارير', users:'المستخدمين', backup:'النسخ الاحتياطي'};
+  const titleMap = {dashboard:'الرئيسية', inventory:'المخزون', audit:'الجرد', purchases:'المشتريات', invoices:'الفواتير', parties:'العملاء والموردين', collections:'التحصيلات والآجل', returns:'المرتجعات', deposits:'توريدات البنك', expenses:'المصروفات', reports:'التقارير', users:'المستخدمين', backup:'النسخ الاحتياطي'};
   document.getElementById('pageTitle').textContent = titleMap[state.view] || '';
   const content = document.getElementById('content');
   const allowed = navItemsFor().map(n=>n.key);
@@ -2192,6 +2293,7 @@ function render(){
   if(state.view==='dashboard'){ content.innerHTML = renderDashboard(); bindDashboardTiles(); }
   else if(state.view==='inventory'){ content.innerHTML = renderInventory(); bindInventory(); }
   else if(state.view==='audit'){ content.innerHTML = renderAudit(); bindAudit(); }
+  else if(state.view==='purchases'){ content.innerHTML = renderPurchases(); bindPurchases(); }
   else if(state.view==='invoices'){ content.innerHTML = renderInvoices(); bindInvoices(); }
   else if(state.view==='parties'){ content.innerHTML = renderParties(); bindParties(); }
   else if(state.view==='collections'){ content.innerHTML = renderCollections(); bindCollections(); }
