@@ -178,6 +178,24 @@ function subscribeShared(key, onChange){
     if(snap.exists) onChange(snap.data().list || []);
   }, err=>console.error('subscribe', key, err));
 }
+/* Same idea as loadShared/saveShared/subscribeShared, but for a single settings
+   object (not a list) - used for things like the bank opening balance. */
+async function loadSharedObj(key, fallback){
+  try{
+    const snap = await db.collection(DATA_COL).doc(key).get();
+    return snap.exists ? Object.assign({}, fallback, snap.data()) : fallback;
+  }catch(e){ console.error('loadSharedObj', key, e); return fallback; }
+}
+function saveSharedObj(key, val){
+  try{
+    db.collection(DATA_COL).doc(key).set(val).catch(err=>{ console.warn('saveSharedObj background sync error', key, err); });
+  }catch(e){ console.error('saveSharedObj', key, e); }
+}
+function subscribeSharedObj(key, onChange){
+  db.collection(DATA_COL).doc(key).onSnapshot(snap=>{
+    if(snap.exists) onChange(snap.data());
+  }, err=>console.error('subscribe obj', key, err));
+}
 function loadPersonal(key, fallback){
   try{ const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }catch(e){ return fallback; }
 }
@@ -191,11 +209,22 @@ if('serviceWorker' in navigator){
 }
 
 const KEYS = {items:'biz_items', parties:'biz_parties', invoices:'biz_invoices', payments:'biz_payments', adjustments:'biz_adjustments', users:'biz_users', expenses:'biz_expenses', returns:'biz_returns', deposits:'biz_deposits', purchases:'biz_purchases'};
+const SETTINGS_KEY = 'biz_settings';
+const DEFAULT_SETTINGS = { bankOpening: 0 };
 
-let state = { items:[], parties:[], invoices:[], payments:[], adjustments:[], users:[], expenses:[], returns:[], deposits:[], purchases:[], view:'dashboard' };
+let state = { items:[], parties:[], invoices:[], payments:[], adjustments:[], users:[], expenses:[], returns:[], deposits:[], purchases:[], settings:{...DEFAULT_SETTINGS}, view:'dashboard' };
 let currentUser = null; // {id,name,role}
 
 async function persist(part){ await saveShared(KEYS[part], state[part]); }
+async function persistSettings(){ saveSharedObj(SETTINGS_KEY, state.settings); }
+
+/* Current bank balance: opening balance + every deposit ever recorded, minus every expense ever recorded. */
+function bankBalance(){
+  const opening = (state.settings && +state.settings.bankOpening) || 0;
+  const depositsTotal = state.deposits.reduce((s,d)=>s+(+d.amount||0), 0);
+  const expensesTotal = state.expenses.reduce((s,e)=>s+(+e.amount||0), 0);
+  return opening + depositsTotal - expensesTotal;
+}
 
 /* Keep every open device in sync in real time */
 function attachLiveSync(){
@@ -204,6 +233,10 @@ function attachLiveSync(){
       state[part] = list;
       if(currentUser) render();
     });
+  });
+  subscribeSharedObj(SETTINGS_KEY, (data)=>{
+    state.settings = Object.assign({...DEFAULT_SETTINGS}, data);
+    if(currentUser) render();
   });
 }
 
@@ -291,7 +324,7 @@ const root = document.getElementById('root');
 /* ================= Boot ================= */
 (async function boot(){
   try{
-    const [items, parties, invoices, payments, adjustments, users, expenses, returns, deposits, purchases] = await Promise.all([
+    const [items, parties, invoices, payments, adjustments, users, expenses, returns, deposits, purchases, settings] = await Promise.all([
       loadShared(KEYS.items, []),
       loadShared(KEYS.parties, []),
       loadShared(KEYS.invoices, []),
@@ -302,9 +335,11 @@ const root = document.getElementById('root');
       loadShared(KEYS.returns, []),
       loadShared(KEYS.deposits, []),
       loadShared(KEYS.purchases, []),
+      loadSharedObj(SETTINGS_KEY, {...DEFAULT_SETTINGS}),
     ]);
     state.items=items; state.parties=parties; state.invoices=invoices;
     state.payments=payments; state.adjustments=adjustments; state.users=users; state.expenses=expenses; state.returns=returns; state.deposits=deposits; state.purchases=purchases;
+    state.settings = Object.assign({...DEFAULT_SETTINGS}, settings);
     attachLiveSync();
     const savedSession = loadPersonal('farfetch_session', null);
     if(savedSession){
@@ -1653,6 +1688,14 @@ function renderDeposits(){
   const summaries = reps.map(u=>({name:u.name, ...repCashSummary(u.name)}));
   const allDeposits = [...state.deposits].sort((a,b)=>a.date<b.date?1:-1);
   return `
+  <div class="card" style="background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:16px;">
+    <div>
+      <div style="font-size:12px;opacity:.85;">رصيد البنك الحالي</div>
+      <div style="font-weight:800;font-size:24px;">${money(bankBalance())}</div>
+      <div style="font-size:11px;opacity:.75;margin-top:2px;">رصيد افتتاحي ${money((state.settings&&state.settings.bankOpening)||0)} + كل التوريدات − كل المصروفات</div>
+    </div>
+    <button class="btn" id="editBankOpeningBtn" style="background:rgba(255,255,255,.15);color:#fff;">✏️ الرصيد الافتتاحي</button>
+  </div>
   <div class="toolbar">
     <p class="muted" style="font-size:13px;margin:0;">متابعة الفلوس اللي مع كل مندوب: اللي حصّله، اللي ورّده للبنك، والباقي معاه.</p>
     <button class="btn btn-primary" id="addDepositBtn">+ تسجيل توريد</button>
@@ -1712,12 +1755,35 @@ function depositModal(){
 function bindDeposits(){
   const addBtn = document.getElementById('addDepositBtn');
   if(addBtn) addBtn.addEventListener('click', depositModal);
+  const editOpeningBtn = document.getElementById('editBankOpeningBtn');
+  if(editOpeningBtn) editOpeningBtn.addEventListener('click', bankOpeningModal);
   document.querySelectorAll('[data-deldeposit]').forEach(b=>b.addEventListener('click', async ()=>{
     if(!confirm('متأكد إنك عايز تحذف التوريد ده؟')) return;
     state.deposits = state.deposits.filter(d=>d.id!==b.dataset.deldeposit);
     await persist('deposits');
     render();
   }));
+}
+function bankOpeningModal(){
+  const current = (state.settings && state.settings.bankOpening) || 0;
+  const html = `
+  <div class="modal">
+    <div class="modal-head"><h3>الرصيد الافتتاحي للبنك</h3><button class="x-btn" data-close>✕</button></div>
+    <div class="modal-body">
+      <p class="muted" style="font-size:13px;margin-top:0;">اكتب هنا إجمالي الفلوس اللي كانت موردة للبنك قبل ما تبدأ تستخدم البرنامج، عشان رصيد البنك يبدأ صح من الأول. أي توريد أو مصروف بعد كده هيتحسب فوق الرقم ده تلقائيًا.</p>
+      <label class="field"><span class="lbl">الرصيد الافتتاحي</span><input id="bo_amount" type="number" value="${current}" autofocus></label>
+      <button class="btn btn-primary" id="saveBankOpeningBtn" style="width:100%;justify-content:center;margin-top:6px;">حفظ</button>
+    </div>
+  </div>`;
+  const modal = openModal(html);
+  modal.querySelector('[data-close]').addEventListener('click', ()=>closeModal(modal));
+  modal.querySelector('#saveBankOpeningBtn').addEventListener('click', async ()=>{
+    const amount = +modal.querySelector('#bo_amount').value;
+    state.settings = Object.assign({...DEFAULT_SETTINGS}, state.settings, {bankOpening: isNaN(amount)?0:amount});
+    await persistSettings();
+    closeModal(modal); render();
+    showToast('تم حفظ الرصيد الافتتاحي ✅');
+  });
 }
 
 /* ---------------- Purchases list (المشتريات) - adds to stock only, no money involved ---------------- */
@@ -1940,6 +2006,11 @@ function renderExpenses(){
   const list = [...state.expenses].sort((a,b)=> a.date<b.date?1:-1);
   const total = list.reduce((s,e)=>s+e.amount,0);
   return `
+  <div class="card" style="background:var(--primary);color:#fff;margin-bottom:16px;">
+    <div style="font-size:12px;opacity:.85;">رصيد البنك الحالي</div>
+    <div style="font-weight:800;font-size:22px;">${money(bankBalance())}</div>
+    <div style="font-size:11px;opacity:.75;margin-top:2px;">كل مصروف بتسجله هنا بيتخصم من رصيد البنك ده تلقائيًا</div>
+  </div>
   <div class="toolbar">
     <div class="card" style="padding:12px 18px;">
       <span class="muted" style="font-size:12px;">إجمالي المصروفات المسجلة</span>
