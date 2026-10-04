@@ -94,6 +94,7 @@
   .badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;}
   .badge.admin{background:var(--goldSoft);color:var(--gold);}
   .badge.rep{background:var(--primarySoft);color:var(--primary);}
+  .badge.viewer{background:#E4DFD1;color:#6E7A73;}
   .modal-bg{position:fixed;inset:0;background:rgba(20,24,20,0.45);display:flex;align-items:center;justify-content:center;padding:16px;z-index:60;}
   .modal{background:var(--surface);border-radius:16px;width:100%;max-width:420px;max-height:88vh;overflow-y:auto;}
   .modal.wide{max-width:640px;}
@@ -254,6 +255,12 @@ const todayStr = () => localDateStr(new Date());
 const fmtDate = d => new Date(d).toLocaleDateString('ar-EG',{day:'numeric',month:'short',year:'numeric'});
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 function isAdmin(){ return currentUser && currentUser.role==='admin'; }
+function isViewer(){ return currentUser && currentUser.role==='viewer'; }
+/* true for admin AND viewer: anyone who should see the full, unscoped data (not just "my own") */
+function canSeeAll(){ return currentUser && (currentUser.role==='admin' || currentUser.role==='viewer'); }
+/* false only for viewer: everyone else keeps whatever they could already do (admin=all, rep=their own) */
+function canWrite(){ return currentUser && currentUser.role!=='viewer'; }
+function roleLabel(role){ return role==='admin' ? 'مدير' : (role==='viewer' ? 'مشاهدة فقط' : 'مندوب'); }
 function showToast(msg){
   const t = document.createElement('div'); t.className='toast'; t.textContent = msg;
   document.body.appendChild(t);
@@ -424,20 +431,20 @@ function renderSetupAdmin(){
 /* ================= Nav ================= */
 function navItemsFor(){
   const all = [
-    {key:'dashboard', label:'الرئيسية', ic:'🏠', roles:['admin','rep']},
-    {key:'pos', label:'نقطة البيع', ic:'🛒', roles:['admin','rep']},
-    {key:'inventory', label:'المخزون', ic:'📦', roles:['admin']},
-    {key:'audit', label:'الجرد', ic:'🧮', roles:['admin']},
-    {key:'purchases', label:'المشتريات', ic:'📥', roles:['admin']},
-    {key:'invoices', label:'الفواتير', ic:'🧾', roles:['admin','rep']},
-    {key:'parties', label:'العملاء والموردين', ic:'👥', roles:['admin','rep']},
-    {key:'collections', label:'التحصيلات والآجل', ic:'💰', roles:['admin','rep']},
-    {key:'returns', label:'المرتجعات', ic:'↩️', roles:['admin','rep']},
-    {key:'deposits', label:'توريدات البنك', ic:'🏦', roles:['admin','rep']},
-    {key:'expenses', label:'المصروفات', ic:'💸', roles:['admin']},
-    {key:'reports', label:'التقارير', ic:'📊', roles:['admin']},
-    {key:'users', label:'المستخدمين', ic:'🔑', roles:['admin']},
-    {key:'backup', label:'النسخ الاحتياطي', ic:'💾', roles:['admin']},
+    {key:'dashboard', label:'الرئيسية', ic:'🏠', roles:['admin','rep','viewer']},
+    {key:'pos', label:'نقطة البيع', ic:'🛒', roles:['admin','rep','viewer']},
+    {key:'inventory', label:'المخزون', ic:'📦', roles:['admin','viewer']},
+    {key:'audit', label:'الجرد', ic:'🧮', roles:['admin','viewer']},
+    {key:'purchases', label:'المشتريات', ic:'📥', roles:['admin','viewer']},
+    {key:'invoices', label:'الفواتير', ic:'🧾', roles:['admin','rep','viewer']},
+    {key:'parties', label:'العملاء والموردين', ic:'👥', roles:['admin','rep','viewer']},
+    {key:'collections', label:'التحصيلات والآجل', ic:'💰', roles:['admin','rep','viewer']},
+    {key:'returns', label:'المرتجعات', ic:'↩️', roles:['admin','rep','viewer']},
+    {key:'deposits', label:'توريدات البنك', ic:'🏦', roles:['admin','rep','viewer']},
+    {key:'expenses', label:'المصروفات', ic:'💸', roles:['admin','viewer']},
+    {key:'reports', label:'التقارير', ic:'📊', roles:['admin','viewer']},
+    {key:'users', label:'المستخدمين', ic:'🔑', roles:['admin','viewer']},
+    {key:'backup', label:'النسخ الاحتياطي', ic:'💾', roles:['admin','viewer']},
   ];
   return all.filter(n => n.roles.includes(currentUser.role));
 }
@@ -455,7 +462,7 @@ function renderApp(){
       </div>
       <div class="who">
         <div class="nm">${esc(currentUser.name)}</div>
-        <div class="rl"><span class="badge ${currentUser.role}">${currentUser.role==='admin'?'مدير':'مندوب'}</span></div>
+        <div class="rl"><span class="badge ${currentUser.role}">${roleLabel(currentUser.role)}</span></div>
         <button class="logout" id="installBtn" style="background:var(--gold);border-color:var(--gold);color:var(--primaryDark);font-weight:700;">📲 تثبيت على الموبايل</button>
         <button class="logout" id="logoutBtn">تسجيل خروج</button>
       </div>
@@ -584,7 +591,7 @@ function renderPOS(){
         <input id="posPaid" type="number" value="${!posCustomerId ? finalTotal : (payNow||'')}" placeholder="0" ${!posCustomerId?'disabled':''}>
       </label>
       ${due>0 ? `<div class="row-line" style="color:var(--brick);"><span>متبقي (آجل)</span><b id="posDueDisplay">${money(due)}</b></div>` : ``}
-      <button class="btn btn-gold" id="completeSaleBtn" style="width:100%;justify-content:center;margin-top:10px;font-size:15px;">✓ إتمام البيع (F9)</button>
+      ${canWrite() ? `<button class="btn btn-gold" id="completeSaleBtn" style="width:100%;justify-content:center;margin-top:10px;font-size:15px;">✓ إتمام البيع (F9)</button>` : `<p class="muted" style="text-align:center;font-size:12px;margin-top:10px;">👁️ وضع مشاهدة فقط - مينفعش تتمم بيع</p>`}
     </div>
   </div>
   <div class="card" style="margin-top:16px;display:flex;gap:14px;flex-wrap:wrap;justify-content:center;">
@@ -606,7 +613,7 @@ function updatePosTotals(){
   if(dueEl) dueEl.textContent = money(due);
 }
 async function completeSale(){
-  if(state.view!=='pos' || posCart.length===0) return;
+  if(!canWrite() || state.view!=='pos' || posCart.length===0) return;
   const cartTotal = posCart.reduce((s,l)=>s+l.qty*l.price,0);
   const finalTotal = Math.max(cartTotal - (+posDiscount||0), 0);
   const party = posCustomerId ? state.parties.find(p=>p.id===posCustomerId) : null;
@@ -743,7 +750,7 @@ function bindDashboardTiles(){
   }));
 }
 function renderDashboard(){
-  if(!isAdmin()){
+  if(!canSeeAll()){
     const myInvoices = state.invoices.filter(v => v.createdById === currentUser.id || (!v.createdById && v.createdBy === currentUser.name));
     const myTodaySales = myInvoices.filter(v=>v.type==='sell' && v.date===todayStr()).reduce((s,v)=>s+v.total,0);
     const myTotalSales = myInvoices.filter(v=>v.type==='sell').reduce((s,v)=>s+v.total,0);
@@ -919,6 +926,7 @@ async function openBarcodeScanner(onDetect){
   }
 }
 function itemModal(item){
+  if(!isAdmin()) return;
   const isNew = !item;
   const f = item ? {...item} : {id:uid(), name:'', unit:UNITS[0], qty:0, minQty:5, buyPrice:0, sellPrice:0, barcode:'', image:'', category:''};
   const html = `
@@ -1010,8 +1018,8 @@ function renderAudit(){
   <div class="toolbar">
     <div class="search-wrap"><span class="search-icon">🔎</span><input id="auditSearch" placeholder="بحث عن صنف..." value="${esc(auditQuery)}"></div>
     <div style="display:flex;gap:8px;">
-      <button class="btn" id="resetAuditBtn" style="background:var(--brickSoft);color:var(--brick);">تصفير</button>
-      <button class="btn btn-primary" id="saveAuditBtn">✓ حفظ التسويات</button>
+      ${isAdmin() ? `<button class="btn" id="resetAuditBtn" style="background:var(--brickSoft);color:var(--brick);">تصفير</button>
+      <button class="btn btn-primary" id="saveAuditBtn">✓ حفظ التسويات</button>` : ''}
     </div>
   </div>
   ${filtered.length===0 ? `<div class="empty"><div class="circle">🧮</div><p>لا توجد أصناف.</p></div>` : `
@@ -1026,7 +1034,7 @@ function renderAudit(){
         return `<tr data-audit-row="${i.id}">
           <td style="font-weight:600;">${esc(i.name)}</td>
           <td class="muted">${i.qty} ${esc(i.unit)}</td>
-          <td><input class="audit-count" data-item="${i.id}" type="number" inputmode="decimal" value="${counted}" style="max-width:110px;"></td>
+          <td><input class="audit-count" data-item="${i.id}" type="number" inputmode="decimal" value="${counted}" style="max-width:110px;" ${isAdmin()?'':'disabled'}></td>
           <td class="audit-diff" style="font-weight:700;color:${diffColor};">${diff>0?'+':''}${diff}</td>
         </tr>`;
       }).join('')}
@@ -1058,6 +1066,7 @@ function bindAudit(){
   if(resetBtn) resetBtn.addEventListener('click', ()=>{ auditDraft = {}; render(); });
   const saveBtn = document.getElementById('saveAuditBtn');
   if(saveBtn) saveBtn.addEventListener('click', async ()=>{
+    if(!isAdmin()) return;
     const changed = [];
     state.items = state.items.map(i=>{
       const counted = auditDraft[i.id];
@@ -1077,9 +1086,9 @@ function bindAudit(){
 /* ---------------- Invoices ---------------- */
 let invoiceTab = 'sell';
 function renderInvoices(){
-  if(!isAdmin() && invoiceTab==='buy') invoiceTab='sell';
+  if(!canSeeAll() && invoiceTab==='buy') invoiceTab='sell';
   let list = state.invoices.filter(v=>v.type===invoiceTab);
-  if(!isAdmin()){
+  if(!canSeeAll()){
     list = list.filter(v => v.createdById === currentUser.id || (!v.createdById && v.createdBy === currentUser.name));
   }
   list = list.sort((a,b)=>a.date<b.date?1:-1);
@@ -1087,15 +1096,15 @@ function renderInvoices(){
   <div class="toolbar">
     <div class="tabs">
       <button class="tab-btn ${invoiceTab==='sell'?'active':''}" data-tab="sell">فواتير البيع</button>
-      ${isAdmin() ? `<button class="tab-btn ${invoiceTab==='buy'?'active':''}" data-tab="buy">فواتير الشراء</button>` : ''}
+      ${canSeeAll() ? `<button class="tab-btn ${invoiceTab==='buy'?'active':''}" data-tab="buy">فواتير الشراء</button>` : ''}
     </div>
-    <button class="btn btn-gold" id="newInvBtn">+ فاتورة جديدة</button>
+    ${canWrite() ? `<button class="btn btn-gold" id="newInvBtn">+ فاتورة جديدة</button>` : ''}
   </div>
   ${list.length===0 ? `<div class="empty"><div class="circle">🧾</div><p>لا توجد فواتير ${invoiceTab==='sell'?'بيع':'شراء'} بعد.</p></div>` :
     `<div class="list-gap">${list.map(v=>`
     <div class="card" style="padding:12px 14px;">
       <div style="font-weight:700;font-size:14px;">${esc(v.partyName)}</div>
-      <div class="muted" style="font-size:11px;margin-top:2px;">${fmtDate(v.date)} · ${v.lines.length} صنف ${(isAdmin() && v.createdBy)?('· '+esc(v.createdBy)):''}</div>
+      <div class="muted" style="font-size:11px;margin-top:2px;">${fmtDate(v.date)} · ${v.lines.length} صنف ${(canSeeAll() && v.createdBy)?('· '+esc(v.createdBy)):''}</div>
       <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;">
         <div style="display:flex;align-items:center;gap:6px;">
           <span style="font-weight:700;font-size:13px;">${money(v.total)}</span>
@@ -1343,6 +1352,7 @@ async function deleteInvoice(inv){
   showToast('تم حذف الفاتورة');
 }
 function invoiceModal(type, existingInv){
+  if(!canWrite()) return;
   const isEdit = !!existingInv;
   const relevant = state.parties.filter(p=>p.type === (type==='sell'?'customer':'supplier'));
   let lines = isEdit ? existingInv.lines.map(l=>({itemId:l.itemId, qty:l.qty, price:l.price})) : [];
@@ -1451,15 +1461,15 @@ function bindInvoices(){
 /* ---------------- Parties ---------------- */
 let partyTab = 'customer';
 function renderParties(){
-  if(!isAdmin() && partyTab==='supplier') partyTab='customer';
+  if(!canSeeAll() && partyTab==='supplier') partyTab='customer';
   const list = state.parties.filter(p=>p.type===partyTab);
   return `
   <div class="toolbar">
     <div class="tabs">
       <button class="tab-btn ${partyTab==='customer'?'active':''}" data-ptab="customer">العملاء</button>
-      ${isAdmin() ? `<button class="tab-btn ${partyTab==='supplier'?'active':''}" data-ptab="supplier">الموردين</button>` : ''}
+      ${canSeeAll() ? `<button class="tab-btn ${partyTab==='supplier'?'active':''}" data-ptab="supplier">الموردين</button>` : ''}
     </div>
-    <button class="btn btn-primary" id="addPartyBtn">+ إضافة ${partyTab==='customer'?'عميل':'مورد'}</button>
+    ${canWrite() ? `<button class="btn btn-primary" id="addPartyBtn">+ إضافة ${partyTab==='customer'?'عميل':'مورد'}</button>` : ''}
   </div>
   ${list.length===0 ? `<div class="empty"><div class="circle">👥</div><p>لا يوجد ${partyTab==='customer'?'عملاء':'موردين'} بعد.</p></div>` :
   `<div class="grid2" style="grid-template-columns:repeat(auto-fill,minmax(240px,1fr));">${list.map(p=>`
@@ -1529,6 +1539,7 @@ function partyStatementModal(party){
   modal.querySelector('[data-close]').addEventListener('click', ()=>closeModal(modal));
 }
 function partyModal(party){
+  if(!canWrite()) return;
   const isNew = !party;
   const f = party ? {...party} : {id:uid(), name:'', phone:'', type:partyTab, balance:0};
   const html = `
@@ -1564,7 +1575,7 @@ function bindParties(){
 /* ---------------- Collections ---------------- */
 function renderCollections(){
   let due = state.parties.filter(p=>(p.balance||0)>0).sort((a,b)=>b.balance-a.balance);
-  if(!isAdmin()) due = due.filter(p=>p.type==='customer');
+  if(!canSeeAll()) due = due.filter(p=>p.type==='customer');
   const recent = [...state.payments].sort((a,b)=>a.date<b.date?1:-1).slice(0,8);
   return `
   <div class="card">
@@ -1578,7 +1589,7 @@ function renderCollections(){
         </div>
         <div style="display:flex;align-items:center;gap:10px;">
           <span style="font-weight:700;color:var(--brick);">${money(p.balance)}</span>
-          <button class="btn btn-primary" data-collect="${p.id}" style="padding:6px 12px;font-size:12px;">تسجيل تحصيل</button>
+          ${canWrite() ? `<button class="btn btn-primary" data-collect="${p.id}" style="padding:6px 12px;font-size:12px;">تسجيل تحصيل</button>` : ''}
         </div>
       </div>`).join('')}
   </div>
@@ -1595,6 +1606,7 @@ function renderCollections(){
   </div>`;
 }
 function collectModal(party){
+  if(!canWrite()) return;
   const balLabel = (party.balance||0) < 0 ? 'له (رصيد زيادة)' : 'المستحق الحالي';
   const html = `
   <div class="modal">
@@ -1665,7 +1677,7 @@ function repCashSummary(repName){
   return { collected, deposited, remaining: collected - deposited };
 }
 function renderDeposits(){
-  if(!isAdmin()){
+  if(!canSeeAll()){
     const sum = repCashSummary(currentUser.name);
     const myDeposits = [...state.deposits].filter(d=>d.userName===currentUser.name).sort((a,b)=>a.date<b.date?1:-1);
     return `
@@ -1694,11 +1706,11 @@ function renderDeposits(){
       <div style="font-weight:800;font-size:24px;">${money(bankBalance())}</div>
       <div style="font-size:11px;opacity:.75;margin-top:2px;">رصيد افتتاحي ${money((state.settings&&state.settings.bankOpening)||0)} + كل التوريدات − كل المصروفات</div>
     </div>
-    <button class="btn" id="editBankOpeningBtn" style="background:rgba(255,255,255,.15);color:#fff;">✏️ الرصيد الافتتاحي</button>
+    ${isAdmin() ? `<button class="btn" id="editBankOpeningBtn" style="background:rgba(255,255,255,.15);color:#fff;">✏️ الرصيد الافتتاحي</button>` : ''}
   </div>
   <div class="toolbar">
     <p class="muted" style="font-size:13px;margin:0;">متابعة الفلوس اللي مع كل مندوب: اللي حصّله، اللي ورّده للبنك، والباقي معاه.</p>
-    <button class="btn btn-primary" id="addDepositBtn">+ تسجيل توريد</button>
+    ${canWrite() ? `<button class="btn btn-primary" id="addDepositBtn">+ تسجيل توريد</button>` : ''}
   </div>
   <div class="card" style="padding:0;">
     <div class="table-wrap"><table>
@@ -1720,12 +1732,13 @@ function renderDeposits(){
         <div><div style="font-weight:600;">${esc(d.userName)}</div><div class="muted" style="font-size:11px;">${fmtDate(d.date)} ${d.note?('· '+esc(d.note)):''}</div></div>
         <div style="display:flex;align-items:center;gap:8px;">
           <span style="font-weight:700;color:var(--gold);">${money(d.amount)}</span>
-          <button class="icon-btn del" data-deldeposit="${d.id}" style="padding:5px;">🗑️</button>
+          ${isAdmin() ? `<button class="icon-btn del" data-deldeposit="${d.id}" style="padding:5px;">🗑️</button>` : ''}
         </div>
       </div>`).join('')}
   </div>`;
 }
 function depositModal(){
+  if(!canWrite()) return;
   const reps = state.users.filter(u=>u.role==='rep' || u.role==='admin');
   const isRepView = !isAdmin();
   const html = `
@@ -1758,6 +1771,7 @@ function bindDeposits(){
   const editOpeningBtn = document.getElementById('editBankOpeningBtn');
   if(editOpeningBtn) editOpeningBtn.addEventListener('click', bankOpeningModal);
   document.querySelectorAll('[data-deldeposit]').forEach(b=>b.addEventListener('click', async ()=>{
+    if(!isAdmin()) return;
     if(!confirm('متأكد إنك عايز تحذف التوريد ده؟')) return;
     state.deposits = state.deposits.filter(d=>d.id!==b.dataset.deldeposit);
     await persist('deposits');
@@ -1765,6 +1779,7 @@ function bindDeposits(){
   }));
 }
 function bankOpeningModal(){
+  if(!isAdmin()) return;
   const current = (state.settings && state.settings.bankOpening) || 0;
   const html = `
   <div class="modal">
@@ -1792,7 +1807,7 @@ function renderPurchases(){
   return `
   <div class="toolbar">
     <p class="muted" style="font-size:13px;margin:0;">تسجيل مشتريات بيزوّد كمية الأصناف في المخزون بس، من غير أي تأثير على الفلوس أو حسابات الموردين.</p>
-    <button class="btn btn-primary" id="addPurchaseBtn">+ مشتريات جديدة</button>
+    ${isAdmin() ? `<button class="btn btn-primary" id="addPurchaseBtn">+ مشتريات جديدة</button>` : ''}
   </div>
   ${list.length===0 ? `<div class="empty"><div class="circle">📥</div><p>لا توجد مشتريات مسجلة بعد.</p></div>` :
     `<div class="list-gap">${list.map(p=>`
@@ -1807,6 +1822,7 @@ function renderPurchases(){
   `;
 }
 function purchaseModal(){
+  if(!isAdmin()) return;
   let lines = [];
   const html = `
   <div class="modal wide">
@@ -1890,7 +1906,7 @@ function renderReturns(){
   return `
   <div class="toolbar">
     <p class="muted" style="font-size:13px;margin:0;">تسجيل مرتجع بيرجع الكمية للمخزون ويخصم قيمتها من رصيد العميل تلقائيًا.</p>
-    <button class="btn btn-gold" id="addReturnBtn">+ مرتجع جديد</button>
+    ${canWrite() ? `<button class="btn btn-gold" id="addReturnBtn">+ مرتجع جديد</button>` : ''}
   </div>
   ${list.length===0 ? `<div class="empty"><div class="circle">↩️</div><p>لا توجد مرتجعات مسجلة بعد.</p></div>` :
     `<div class="list-gap">${list.map(r=>`
@@ -1905,6 +1921,7 @@ function renderReturns(){
   `;
 }
 function returnModal(){
+  if(!canWrite()) return;
   const customerOptions = state.parties.filter(p=>p.type==='customer');
   let lines = [];
   const html = `
@@ -2016,7 +2033,7 @@ function renderExpenses(){
       <span class="muted" style="font-size:12px;">إجمالي المصروفات المسجلة</span>
       <div style="font-weight:800;font-size:18px;color:var(--brick);">${money(total)}</div>
     </div>
-    <button class="btn btn-primary" id="addExpenseBtn">+ إضافة مصروف</button>
+    ${isAdmin() ? `<button class="btn btn-primary" id="addExpenseBtn">+ إضافة مصروف</button>` : ''}
   </div>
   ${list.length===0 ? `<div class="empty"><div class="circle">💸</div><p>لا توجد مصروفات مسجلة بعد.</p></div>` : `
   <div class="card" style="padding:0;">
@@ -2028,13 +2045,14 @@ function renderExpenses(){
         <td style="font-weight:600;">${esc(e.category)}</td>
         <td class="muted">${esc(e.note||'—')}</td>
         <td style="font-weight:700;color:var(--brick);">${money(e.amount)}</td>
-        <td><button class="icon-btn del" data-edel="${e.id}">🗑️</button></td>
+        <td>${isAdmin() ? `<button class="icon-btn del" data-edel="${e.id}">🗑️</button>` : ''}</td>
       </tr>`).join('')}
       </tbody>
     </table></div>
   </div>`}`;
 }
 function expenseModal(){
+  if(!isAdmin()) return;
   const html = `
   <div class="modal">
     <div class="modal-head"><h3>إضافة مصروف</h3><button class="x-btn" data-close>✕</button></div>
@@ -2060,6 +2078,7 @@ function bindExpenses(){
   const addBtn = document.getElementById('addExpenseBtn');
   if(addBtn) addBtn.addEventListener('click', expenseModal);
   document.querySelectorAll('[data-edel]').forEach(b=>b.addEventListener('click', async ()=>{
+    if(!isAdmin()) return;
     state.expenses = state.expenses.filter(e=>e.id!==b.dataset.edel); await persist('expenses'); render();
   }));
 }
@@ -2246,12 +2265,13 @@ function renderBackup(){
     <p class="muted" style="font-size:13px;">احفظ نسخة من كل بيانات المتجر (الأصناف، العملاء، الفواتير، المصروفات، المستخدمين...) في ملف على جهازك.</p>
     <button class="btn btn-primary" id="exportBackupBtn" style="margin-top:10px;">⬇️ تنزيل نسخة احتياطية</button>
   </div>
+  ${isAdmin() ? `
   <div class="card" style="margin-top:18px;">
     <h3 class="section-title" style="color:var(--brick);">♻️ استعادة من نسخة سابقة</h3>
     <p class="muted" style="font-size:13px;">تنبيه: استعادة نسخة قديمة هتستبدل كل البيانات الحالية بالكامل لكل المستخدمين، ومفيش رجوع بعدها.</p>
     <label class="field" style="margin-top:10px;"><span class="lbl">اختار ملف النسخة الاحتياطية (.json)</span><input type="file" id="restoreFileInput" accept="application/json"></label>
     <button class="btn" id="restoreBackupBtn" style="background:var(--brickSoft);color:var(--brick);">♻️ استعادة النسخة</button>
-  </div>`;
+  </div>` : ''}`;
 }
 function bindBackup(){
   const exportBtn = document.getElementById('exportBackupBtn');
@@ -2270,6 +2290,7 @@ function bindBackup(){
   });
   const restoreBtn = document.getElementById('restoreBackupBtn');
   if(restoreBtn) restoreBtn.addEventListener('click', async ()=>{
+    if(!isAdmin()) return;
     const fileInput = document.getElementById('restoreFileInput');
     if(!fileInput.files || !fileInput.files[0]){ showToast('اختار ملف النسخة الاحتياطية الأول'); return; }
     if(!confirm('متأكد إنك عايز تستعيد النسخة دي؟ هيستبدل كل البيانات الحالية بالكامل ومفيش رجوع.')) return;
@@ -2288,27 +2309,28 @@ function bindBackup(){
 function renderUsers(){
   return `
   <div class="toolbar">
-    <p class="muted" style="font-size:13px;margin:0;">أضف حساب لكل مندوب بكود دخول (PIN) وعمولة عن كل قطعة يبيعها.</p>
-    <button class="btn btn-primary" id="addUserBtn">+ إضافة مستخدم</button>
+    <p class="muted" style="font-size:13px;margin:0;">أضف حساب لكل مندوب بكود دخول (PIN) وعمولة عن كل قطعة يبيعها، أو حساب مشاهدة فقط يشوف كل حاجة من غير تعديل.</p>
+    ${isAdmin() ? `<button class="btn btn-primary" id="addUserBtn">+ إضافة مستخدم</button>` : ''}
   </div>
   <div class="list-gap">
     ${state.users.map(u=>`
     <div class="card party-card">
       <div style="display:flex;align-items:center;gap:10px;">
-        <span class="badge ${u.role}">${u.role==='admin'?'مدير':'مندوب'}</span>
+        <span class="badge ${u.role}">${roleLabel(u.role)}</span>
         <div>
           <div style="font-weight:600;">${esc(u.name)}</div>
           ${u.role==='rep' ? `<div class="muted" style="font-size:11px;">عمولة القطعة: ${money(u.commissionPerPiece||0)}</div>` : ``}
         </div>
       </div>
-      <div style="display:flex;gap:6px;align-items:center;">
+      ${isAdmin() ? `<div style="display:flex;gap:6px;align-items:center;">
         <button class="icon-btn edit" data-uedit="${u.id}">✏️</button>
         ${u.id!==currentUser.id ? `<button class="icon-btn del" data-udel="${u.id}">🗑️</button>` : `<span class="muted" style="font-size:12px;">(أنت)</span>`}
-      </div>
+      </div>` : ''}
     </div>`).join('')}
   </div>`;
 }
 function userModal(existingUser){
+  if(!isAdmin()) return;
   const isEdit = !!existingUser;
   const f = existingUser ? {...existingUser} : {id:uid(), name:'', pin:'', role:'rep', commissionPerPiece:0};
   const html = `
@@ -2317,7 +2339,7 @@ function userModal(existingUser){
     <div class="modal-body">
       <label class="field"><span class="lbl">الاسم</span><input id="u_name" placeholder="اسم المندوب" value="${esc(f.name)}"></label>
       <label class="field"><span class="lbl">كود دخول (PIN)</span><input id="u_pin" type="password" inputmode="numeric" placeholder="مثال: 1234" value="${esc(f.pin)}"></label>
-      <label class="field"><span class="lbl">الصلاحية</span><select id="u_role"><option value="rep" ${f.role==='rep'?'selected':''}>مندوب (صلاحيات محدودة)</option><option value="admin" ${f.role==='admin'?'selected':''}>مدير (كل الصلاحيات)</option></select></label>
+      <label class="field"><span class="lbl">الصلاحية</span><select id="u_role"><option value="rep" ${f.role==='rep'?'selected':''}>مندوب (صلاحيات محدودة)</option><option value="admin" ${f.role==='admin'?'selected':''}>مدير (كل الصلاحيات)</option><option value="viewer" ${f.role==='viewer'?'selected':''}>مشاهدة فقط (يشوف كل حاجة من غير تعديل)</option></select></label>
       <label class="field"><span class="lbl">عمولة عن كل قطعة مباعة (جنيه)</span><input id="u_commission" type="number" step="0.01" value="${f.commissionPerPiece||0}"></label>
       <button class="btn btn-primary" id="saveUserBtn" style="width:100%;justify-content:center;margin-top:6px;">حفظ</button>
     </div>
