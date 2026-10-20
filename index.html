@@ -768,6 +768,7 @@ function renderDashboard(){
     </div>`;
   }
   const invValue = state.items.reduce((s,i)=>s+i.qty*i.buyPrice,0);
+  const invValueSell = state.items.reduce((s,i)=>s+i.qty*i.sellPrice,0);
   const lowStock = state.items.filter(i=>i.qty<=i.minQty);
   const customersDue = state.parties.filter(p=>p.type==='customer').reduce((s,p)=>s+Math.max(p.balance,0),0);
   const suppliersDue = state.parties.filter(p=>p.type==='supplier').reduce((s,p)=>s+Math.max(p.balance,0),0);
@@ -788,7 +789,8 @@ function renderDashboard(){
   return `
   ${renderDashboardTiles()}
   <div class="grid-stats">
-    <div class="card"><div class="stat-top"><span class="stat-label">قيمة المخزون</span><div class="stat-icon" style="background:#0F5C4F22;color:#0F5C4F;">📦</div></div><div class="stat-value">${money(invValue)}</div></div>
+    <div class="card"><div class="stat-top"><span class="stat-label">قيمة المخزون</span><div class="stat-icon" style="background:#0F5C4F22;color:#0F5C4F;">📦</div></div><div class="stat-value">${money(invValue)}</div><div class="stat-sub">بسعر الشراء</div></div>
+    <div class="card"><div class="stat-top"><span class="stat-label">قيمة المخزون</span><div class="stat-icon" style="background:#C79A2E22;color:#C79A2E;">💹</div></div><div class="stat-value">${money(invValueSell)}</div><div class="stat-sub">بسعر البيع</div></div>
     <div class="card"><div class="stat-top"><span class="stat-label">مبيعات اليوم</span><div class="stat-icon" style="background:#C79A2E22;color:#C79A2E;">📈</div></div><div class="stat-value">${money(todaySales)}</div></div>
     <div class="card"><div class="stat-top"><span class="stat-label">مستحق من العملاء</span><div class="stat-icon" style="background:#A8462E22;color:#A8462E;">⬇️</div></div><div class="stat-value">${money(customersDue)}</div><div class="stat-sub">آجل</div></div>
     <div class="card"><div class="stat-top"><span class="stat-label">مستحق للموردين</span><div class="stat-icon" style="background:#0A423922;color:#0A4239;">⬆️</div></div><div class="stat-value">${money(suppliersDue)}</div><div class="stat-sub">آجل</div></div>
