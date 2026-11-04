@@ -844,7 +844,7 @@ function renderInventory(){
       <thead><tr><th></th><th>الصنف</th><th>التصنيف</th><th>الوحدة</th><th>الكمية</th><th>سعر الشراء</th><th>سعر البيع</th><th>القيمة</th>${isAdmin()?'<th></th>':''}</tr></thead>
       <tbody>
       ${filtered.map(i=>`<tr>
-        <td>${i.image ? `<img src="${i.image}" style="width:34px;height:34px;border-radius:8px;object-fit:cover;">` : `<div style="width:34px;height:34px;border-radius:8px;background:var(--primarySoft);display:flex;align-items:center;justify-content:center;">👕</div>`}</td>
+        <td>${i.image ? `<img src="${i.image}" data-viewimg="${i.id}" style="width:34px;height:34px;border-radius:8px;object-fit:cover;cursor:zoom-in;">` : `<div style="width:34px;height:34px;border-radius:8px;background:var(--primarySoft);display:flex;align-items:center;justify-content:center;">👕</div>`}</td>
         <td style="font-weight:600;">${esc(i.name)}</td>
         <td class="muted">${esc(i.category||'—')}</td>
         <td class="muted">${esc(i.unit)}</td>
@@ -987,7 +987,23 @@ function itemModal(item){
     closeModal(modal); render();
   });
 }
+function itemImageViewer(item){
+  const html = `
+  <div class="modal" style="max-width:520px;">
+    <div class="modal-head"><h3>${esc(item.name)}</h3><button class="x-btn" data-close>✕</button></div>
+    <div class="modal-body" style="text-align:center;">
+      <img src="${item.image}" style="max-width:100%;max-height:70vh;border-radius:12px;object-fit:contain;">
+      <div class="muted" style="font-size:12px;margin-top:10px;">${esc(item.category||'')} · الكمية: ${item.qty} ${esc(item.unit||'')} · ${money(item.sellPrice)}</div>
+    </div>
+  </div>`;
+  const modal = openModal(html);
+  modal.querySelector('[data-close]').addEventListener('click', ()=>closeModal(modal));
+}
 function bindInventory(){
+  document.querySelectorAll('[data-viewimg]').forEach(img=>img.addEventListener('click', ()=>{
+    const it = state.items.find(x=>x.id===img.dataset.viewimg);
+    if(it && it.image) itemImageViewer(it);
+  }));
   const s = document.getElementById('invSearch');
   if(s) s.addEventListener('input', e=>{ invQuery = e.target.value; render(); });
   document.querySelectorAll('[data-cat]').forEach(b=>b.addEventListener('click', ()=>{ invCategory = b.dataset.cat; render(); }));
