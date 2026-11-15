@@ -165,19 +165,144 @@ async function loadShared(key, fallback){
     return snap.exists ? (snap.data().list || fallback) : fallback;
   }catch(e){ console.error('loadShared', key, e); return fallback; }
 }
-async function saveShared(key, val){
-  try{
-    // Don't await the network round-trip: Firestore already commits this to its local
-    // offline cache synchronously, so the UI can proceed immediately. The write itself
-    // keeps syncing to the server in the background once connectivity returns.
-    db.collection(DATA_COL).doc(key).set({list: val}).catch(err=>{ console.warn('saveShared background sync error', key, err); });
-  }
-  catch(e){ console.error('saveShared', key, e); }
+/* ---------------------------------------------------------------------------
+   Storage, version 2: one Firestore document per record.
+
+   Version 1 kept each list (all items, all invoices...) inside a single document.
+   That had two problems: a document cannot be larger than 1 MB (item photos got
+   there quickly), and every save rewrote the whole list, so a phone coming back
+   online overwrote whatever the other phones had saved meanwhile.
+
+   Now every record lives at  farfetch_data/<list key>/rows/<record id>  and a
+   save writes only the records that actually changed. Stock quantity and party
+   balance are written as "add this much" rather than "set to this value", so two
+   phones selling the same item at once both count.
+   --------------------------------------------------------------------------- */
+const STORAGE_VERSION = 2;
+const META_DOC = '_meta';
+const INCREMENT_FIELDS = { items:['qty'], parties:['balance'] };
+const rowsCol = key => db.collection(DATA_COL).doc(key).collection('rows');
+const syncedRows = {};   // part -> Map(record id -> JSON of the record as last read from / written to the database)
+
+function commitOps(ops){
+  // A batch is capped at 500 writes and about 10 MB, so split by both.
+  const chunks = []; let cur = [], bytes = 0;
+  ops.forEach(op=>{
+    if(cur.length >= 400 || (cur.length && bytes + op.size > 3000000)){ chunks.push(cur); cur = []; bytes = 0; }
+    cur.push(op); bytes += op.size;
+  });
+  if(cur.length) chunks.push(cur);
+  return chunks.map(chunk=>{
+    const batch = db.batch();
+    chunk.forEach(op=>{
+      if(op.type==='delete') batch.delete(op.ref);
+      else if(op.type==='patch') batch.set(op.ref, op.data, {merge:true});
+      else batch.set(op.ref, op.data);
+    });
+    return batch.commit();
+  });
 }
-function subscribeShared(key, onChange){
-  db.collection(DATA_COL).doc(key).onSnapshot(snap=>{
-    if(snap.exists) onChange(snap.data().list || []);
-  }, err=>console.error('subscribe', key, err));
+/* Work out what changed in every list since the last sync and write just that, as one
+   batch - so a sale's invoice, stock change and customer balance are saved together or not at all. */
+function flushChanges(){
+  const FV = firebase.firestore.FieldValue;
+  const ops = [];
+  Object.keys(KEYS).forEach(part=>{
+    const col = rowsCol(KEYS[part]);
+    const prev = syncedRows[part] || new Map();
+    const next = new Map();
+    const incFields = INCREMENT_FIELDS[part] || [];
+    (state[part]||[]).forEach((row, idx)=>{
+      if(!row || typeof row!=='object') return;
+      if(!row.id) row.id = uid();
+      const oldJson = prev.get(row.id);
+      // _o keeps lists in the order records were added; an edited record keeps its original place
+      if(row._o==null) row._o = oldJson!==undefined ? (JSON.parse(oldJson)._o ?? 0) : Date.now() + idx/1000;
+      const json = JSON.stringify(row);
+      next.set(row.id, json);
+      if(oldJson === json) return;
+      const clean = JSON.parse(json);
+      if(oldJson === undefined){ ops.push({type:'set', ref: col.doc(row.id), data: clean, size: json.length}); return; }
+      const old = JSON.parse(oldJson);
+      const patch = { id: row.id }; let size = 50;
+      Object.keys(clean).forEach(k=>{
+        const v = JSON.stringify(clean[k]);
+        if(v === JSON.stringify(old[k])) return;
+        const numeric = typeof clean[k]==='number' && typeof old[k]==='number';
+        patch[k] = (incFields.includes(k) && numeric) ? FV.increment(clean[k] - old[k]) : clean[k];
+        size += v.length;
+      });
+      Object.keys(old).forEach(k=>{ if(!(k in clean)) patch[k] = FV.delete(); });
+      ops.push({type:'patch', ref: col.doc(row.id), data: patch, size});
+    });
+    prev.forEach((_, id)=>{ if(!next.has(id)) ops.push({type:'delete', ref: col.doc(id), size: 50}); });
+    syncedRows[part] = next;
+  });
+  if(!ops.length) return;
+  // Not awaited: Firestore saves to the phone first, so the screen never waits for the network.
+  commitOps(ops).forEach(pr=>pr.catch(err=>{ console.warn('save failed', err); reportSyncError('rows', err); }));
+}
+function subscribeRows(part, onFirst, onError){
+  let first = true;
+  rowsCol(KEYS[part]).onSnapshot(snap=>{
+    const rows = [];
+    snap.forEach(d=>{ const r = d.data(); if(r && r.id) rows.push(r); });   // a record with no id is the leftover of a deleted one
+    rows.sort((x,y)=>(x._o||0)-(y._o||0));
+    state[part] = rows;
+    syncedRows[part] = new Map(rows.map(r=>[r.id, JSON.stringify(r)]));
+    if(first){ first = false; onFirst(); }
+    else onRowsChanged(part);
+  }, err=>{ console.error('subscribe', part, err); if(first) onError(err); });
+}
+/* One-time move of the version-1 lists into per-record documents. The old documents are
+   left exactly as they were, as a safety copy. */
+async function migrateIfNeeded(){
+  const metaRef = db.collection(DATA_COL).doc(META_DOC);
+  const needNet = 'أول تشغيل بعد التحديث محتاج اتصال بالإنترنت علشان البيانات تتنقل للنظام الجديد. شغّل النت وافتح البرنامج تاني.';
+  let meta;
+  try{ meta = await metaRef.get(); }
+  catch(e){ if(e && e.code==='unavailable') throw new Error(needNet); throw e; }
+  if(meta.exists && (meta.data().storageVersion||0) >= STORAGE_VERSION) return;
+  if(meta.metadata && meta.metadata.fromCache) throw new Error(needNet);
+  root.textContent = '...جارِ تحديث قاعدة البيانات، ما تقفلش البرنامج';
+  const legacy = {};
+  for(const part of Object.keys(KEYS)){
+    const key = KEYS[part];
+    const snap = await db.collection(DATA_COL).doc(key).get({source:'server'});
+    const list = snap.exists ? (snap.data().list || []) : [];
+    legacy[key] = JSON.stringify(list).length;
+    const ops = [];
+    list.forEach((row, idx)=>{
+      if(!row || typeof row!=='object') return;
+      const clean = JSON.parse(JSON.stringify(row));
+      if(!clean.id) clean.id = uid();
+      if(clean._o==null) clean._o = idx;
+      ops.push({type:'set', ref: rowsCol(key).doc(clean.id), data: clean, size: JSON.stringify(clean).length});
+    });
+    await Promise.all(commitOps(ops));
+  }
+  await metaRef.set({storageVersion: STORAGE_VERSION, migratedAt: new Date().toISOString(), legacy});
+}
+/* A phone that still has the old version open keeps saving into the old documents, where the
+   new version never looks. If those documents changed after the move, tell the admin once. */
+async function warnIfOldVersionStillInUse(){
+  try{
+    if(!isAdmin() || !navigator.onLine) return;
+    const metaRef = db.collection(DATA_COL).doc(META_DOC);
+    const meta = await metaRef.get();
+    const legacy = meta.exists && meta.data().legacy;
+    if(!legacy) return;
+    const changed = [], now = {};
+    for(const key of Object.values(KEYS)){
+      const snap = await db.collection(DATA_COL).doc(key).get();
+      const len = snap.exists ? JSON.stringify(snap.data().list || []).length : 2;
+      now[key] = len;
+      if(key in legacy && legacy[key] !== len) changed.push(key);
+    }
+    if(!changed.length) return;
+    await metaRef.set({legacy: now}, {merge:true});
+    alert('تنبيه: فيه جهاز لسه شغال بالنسخة القديمة من البرنامج وسجّل عليها حاجات بعد التحديث. الحاجات دي مش هتظهر هنا.\n\nاقفل البرنامج على كل الأجهزة وافتحه تاني وهو متصل بالنت، وسجّل العمليات دي من جديد.');
+  }catch(e){ console.warn('legacy check failed', e); }
 }
 /* Same idea as loadShared/saveShared/subscribeShared, but for a single settings
    object (not a list) - used for things like the bank opening balance. */
@@ -196,6 +321,17 @@ function subscribeSharedObj(key, onChange){
   db.collection(DATA_COL).doc(key).onSnapshot(snap=>{
     if(snap.exists) onChange(snap.data());
   }, err=>console.error('subscribe obj', key, err));
+}
+/* A failed write used to be invisible (console only), so a sale could look saved on this
+   phone and never reach the other devices. Tell the user, at most once every 20 seconds. */
+let lastSyncErrorAt = 0;
+function reportSyncError(key, err){
+  if(Date.now() - lastSyncErrorAt < 20000) return;
+  lastSyncErrorAt = Date.now();
+  const tooBig = err && /exceeds the maximum|maximum allowed size|invalid-argument/i.test(String(err.message||err.code||''));
+  alert(tooBig
+    ? 'تنبيه مهم: آخر عملية ما اتحفظتش على السيرفر لأن حجمها أكبر من المسموح (غالبًا صورة صنف كبيرة جدًا). جرّب صورة أصغر.'
+    : 'تنبيه: آخر عملية ما اتحفظتش على السيرفر (' + (err && (err.code||err.message) || 'خطأ غير معروف') + '). اتأكد من النت وجرّب تاني.');
 }
 function loadPersonal(key, fallback){
   try{ const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }catch(e){ return fallback; }
@@ -216,7 +352,8 @@ const DEFAULT_SETTINGS = { bankOpening: 0 };
 let state = { items:[], parties:[], invoices:[], payments:[], adjustments:[], users:[], expenses:[], returns:[], deposits:[], purchases:[], settings:{...DEFAULT_SETTINGS}, view:'dashboard' };
 let currentUser = null; // {id,name,role}
 
-async function persist(part){ await saveShared(KEYS[part], state[part]); }
+/* Saves every list that changed (not only `part`), in one batch. */
+async function persist(part){ flushChanges(); }
 async function persistSettings(){ saveSharedObj(SETTINGS_KEY, state.settings); }
 
 /* Current bank balance: opening balance + every deposit ever recorded, minus every expense ever recorded. */
@@ -228,17 +365,23 @@ function bankBalance(){
 }
 
 /* Keep every open device in sync in real time */
+function onRowsChanged(part){
+  if(part==='users' && currentUser){
+    const me = state.users.find(u=>u.id===currentUser.id);
+    if(!me){ currentUser = null; savePersonal('farfetch_session', null); modalStack.slice().forEach(closeModal); renderLogin(); return; }
+    const roleChanged = me.role !== currentUser.role;
+    currentUser = {id:me.id, name:me.name, role:me.role};
+    if(roleChanged){ state.view = 'dashboard'; modalStack.slice().forEach(closeModal); renderApp(); return; }
+  }
+  if(currentUser) render();
+}
 function attachLiveSync(){
-  Object.entries(KEYS).forEach(([part, key])=>{
-    subscribeShared(key, (list)=>{
-      state[part] = list;
-      if(currentUser) render();
-    });
-  });
+  const firsts = Object.keys(KEYS).map(part => new Promise((resolve, reject)=> subscribeRows(part, resolve, reject)));
   subscribeSharedObj(SETTINGS_KEY, (data)=>{
     state.settings = Object.assign({...DEFAULT_SETTINGS}, data);
     if(currentUser) render();
   });
+  return Promise.all(firsts);
 }
 
 /* ---------------- helpers ---------------- */
@@ -253,6 +396,10 @@ function localDateStr(d){
 }
 const todayStr = () => localDateStr(new Date());
 const fmtDate = d => new Date(d).toLocaleDateString('ar-EG',{day:'numeric',month:'short',year:'numeric'});
+function nextNumber(list, field, prefix){
+  const max = list.reduce((m,x)=>{ const n = parseInt(String(x[field]||'').replace(/\D/g,''),10); return n>m ? n : m; }, 0);
+  return prefix + String(max+1).padStart(6,'0');
+}
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 function isAdmin(){ return currentUser && currentUser.role==='admin'; }
 function isViewer(){ return currentUser && currentUser.role==='viewer'; }
@@ -331,27 +478,14 @@ const root = document.getElementById('root');
 /* ================= Boot ================= */
 (async function boot(){
   try{
-    const [items, parties, invoices, payments, adjustments, users, expenses, returns, deposits, purchases, settings] = await Promise.all([
-      loadShared(KEYS.items, []),
-      loadShared(KEYS.parties, []),
-      loadShared(KEYS.invoices, []),
-      loadShared(KEYS.payments, []),
-      loadShared(KEYS.adjustments, []),
-      loadShared(KEYS.users, []),
-      loadShared(KEYS.expenses, []),
-      loadShared(KEYS.returns, []),
-      loadShared(KEYS.deposits, []),
-      loadShared(KEYS.purchases, []),
-      loadSharedObj(SETTINGS_KEY, {...DEFAULT_SETTINGS}),
-    ]);
-    state.items=items; state.parties=parties; state.invoices=invoices;
-    state.payments=payments; state.adjustments=adjustments; state.users=users; state.expenses=expenses; state.returns=returns; state.deposits=deposits; state.purchases=purchases;
+    await migrateIfNeeded();
+    const settings = await loadSharedObj(SETTINGS_KEY, {...DEFAULT_SETTINGS});
     state.settings = Object.assign({...DEFAULT_SETTINGS}, settings);
-    attachLiveSync();
+    await attachLiveSync();   // resolves once every list has arrived (from the phone's own copy when offline)
     const savedSession = loadPersonal('farfetch_session', null);
     if(savedSession){
       const u = state.users.find(x=>x.id===savedSession.id);
-      if(u){ currentUser = {id:u.id, name:u.name, role:u.role}; renderApp(); return; }
+      if(u){ currentUser = {id:u.id, name:u.name, role:u.role}; renderApp(); warnIfOldVersionStillInUse(); return; }
     }
     renderLogin();
   }catch(err){
@@ -400,6 +534,7 @@ function renderLogin(){
     savePersonal('farfetch_session', {id:u.id});
     state.view = 'dashboard';
     renderApp();
+    warnIfOldVersionStillInUse();
   });
 }
 function renderSetupAdmin(){
@@ -614,6 +749,8 @@ function updatePosTotals(){
 }
 async function completeSale(){
   if(!canWrite() || state.view!=='pos' || posCart.length===0) return;
+  const short = posCart.map(l=>({l, it: state.items.find(i=>i.id===l.itemId)})).filter(x=>x.it && x.l.qty > x.it.qty);
+  if(short.length && !confirm('الكمية المطلوبة أكبر من المتاح في المخزن:\n' + short.map(x=>`${x.it.name}: مطلوب ${x.l.qty} والمتاح ${x.it.qty}`).join('\n') + '\n\nتكمّل البيع والرصيد يبقى بالسالب؟')) return;
   const cartTotal = posCart.reduce((s,l)=>s+l.qty*l.price,0);
   const finalTotal = Math.max(cartTotal - (+posDiscount||0), 0);
   const party = posCustomerId ? state.parties.find(p=>p.id===posCustomerId) : null;
@@ -621,7 +758,7 @@ async function completeSale(){
   const payNow = posCustomerId ? Math.min(posPaidAmount||0, finalTotal) : finalTotal;
   const due = Math.max(finalTotal - payNow, 0);
   const inv = {
-    id: uid(), invoiceNumber: 'INV-'+String(state.invoices.length+1).padStart(6,'0'),
+    id: uid(), invoiceNumber: nextNumber(state.invoices,'invoiceNumber','INV-'),
     type:'sell', partyId: posCustomerId||null, partyName: party?party.name:'عميل نقدي',
     date: todayStr(),
     lines: posCart.map(l=>({itemId:l.itemId, qty:l.qty, price:l.price, itemName: state.items.find(i=>i.id===l.itemId)?.name||'', cost: state.items.find(i=>i.id===l.itemId)?.buyPrice||0})),
@@ -769,6 +906,7 @@ function renderDashboard(){
   }
   const invValue = state.items.reduce((s,i)=>s+i.qty*i.buyPrice,0);
   const invValueSell = state.items.reduce((s,i)=>s+i.qty*i.sellPrice,0);
+  const invPieces = state.items.reduce((s,i)=>s+(+i.qty||0),0);
   const lowStock = state.items.filter(i=>i.qty<=i.minQty);
   const customersDue = state.parties.filter(p=>p.type==='customer').reduce((s,p)=>s+Math.max(p.balance,0),0);
   const suppliersDue = state.parties.filter(p=>p.type==='supplier').reduce((s,p)=>s+Math.max(p.balance,0),0);
@@ -791,6 +929,7 @@ function renderDashboard(){
   <div class="grid-stats">
     <div class="card"><div class="stat-top"><span class="stat-label">قيمة المخزون</span><div class="stat-icon" style="background:#0F5C4F22;color:#0F5C4F;">📦</div></div><div class="stat-value">${money(invValue)}</div><div class="stat-sub">بسعر الشراء</div></div>
     <div class="card"><div class="stat-top"><span class="stat-label">قيمة المخزون</span><div class="stat-icon" style="background:#C79A2E22;color:#C79A2E;">💹</div></div><div class="stat-value">${money(invValueSell)}</div><div class="stat-sub">بسعر البيع</div></div>
+    <div class="card"><div class="stat-top"><span class="stat-label">عدد القطع في المخزن</span><div class="stat-icon" style="background:#0F5C4F22;color:#0F5C4F;">🧮</div></div><div class="stat-value">${invPieces.toLocaleString('ar-EG')}</div><div class="stat-sub">قطعة في ${state.items.length.toLocaleString('ar-EG')} صنف</div></div>
     <div class="card"><div class="stat-top"><span class="stat-label">مبيعات اليوم</span><div class="stat-icon" style="background:#C79A2E22;color:#C79A2E;">📈</div></div><div class="stat-value">${money(todaySales)}</div></div>
     <div class="card"><div class="stat-top"><span class="stat-label">مستحق من العملاء</span><div class="stat-icon" style="background:#A8462E22;color:#A8462E;">⬇️</div></div><div class="stat-value">${money(customersDue)}</div><div class="stat-sub">آجل</div></div>
     <div class="card"><div class="stat-top"><span class="stat-label">مستحق للموردين</span><div class="stat-icon" style="background:#0A423922;color:#0A4239;">⬆️</div></div><div class="stat-value">${money(suppliersDue)}</div><div class="stat-sub">آجل</div></div>
@@ -1013,6 +1152,9 @@ function bindInventory(){
     itemModal(state.items.find(i=>i.id===b.dataset.edit));
   }));
   document.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click', async ()=>{
+    if(!isAdmin()) return;
+    const it = state.items.find(i=>i.id===b.dataset.del);
+    if(!it || !confirm(`متأكد إنك عايز تحذف الصنف "${it.name}"؟` + (it.qty ? `\nلسه فيه ${it.qty} في المخزن.` : ''))) return;
     state.items = state.items.filter(i=>i.id!==b.dataset.del); await persist('items'); render();
   }));
 }
@@ -1439,19 +1581,22 @@ function invoiceModal(type, existingInv){
   renderLines(); updateTotals();
   modal.querySelector('#saveInvBtn').addEventListener('click', async ()=>{
     const partyId = modal.querySelector('#inv_party').value;
-    if(!partyId || lines.length===0) return;
+    const cashEdit = isEdit && !existingInv.partyId && !partyId;
+    if(!partyId && !cashEdit){ showToast(type==='sell' ? 'اختار العميل الأول' : 'اختار المورد الأول'); return; }
+    if(lines.length===0){ showToast('ضيف صنف واحد على الأقل'); return; }
+    if(lines.some(l=>!(l.qty>0) || !(l.price>=0))){ showToast('راجع الكميات والأسعار: الكمية لازم تكون أكبر من صفر'); return; }
     if(isEdit) reverseInvoiceEffects(existingInv);
     const subtotal = lines.reduce((s,l)=>s+l.qty*l.price,0);
     const discount = +modal.querySelector('#inv_discount').value || 0;
     const total = Math.max(subtotal - discount, 0);
-    const paid = Math.min(+modal.querySelector('#inv_paid').value || 0, total);
+    const paid = cashEdit ? total : Math.min(Math.max(+modal.querySelector('#inv_paid').value || 0, 0), total);
     const due = Math.max(total-paid,0);
     const party = state.parties.find(p=>p.id===partyId);
     const previousBalance = party ? (party.balance||0) : 0;
-    const inv = { id: isEdit?existingInv.id:uid(), invoiceNumber: isEdit?existingInv.invoiceNumber:('INV-'+String(state.invoices.length+1).padStart(6,'0')), type, partyId, partyName: party?party.name:'', date: modal.querySelector('#inv_date').value || todayStr(),
+    const inv = { id: isEdit?existingInv.id:uid(), invoiceNumber: isEdit?existingInv.invoiceNumber:nextNumber(state.invoices,'invoiceNumber','INV-'), type, partyId: partyId||null, partyName: party?party.name:'عميل نقدي', date: modal.querySelector('#inv_date').value || todayStr(),
       lines: lines.map(l=>({...l, itemName: state.items.find(i=>i.id===l.itemId)?.name || '', cost: state.items.find(i=>i.id===l.itemId)?.buyPrice || 0})), subtotal, discount, total, paid, due, previousBalance,
       createdBy: isEdit?existingInv.createdBy:currentUser.name, createdById: isEdit?existingInv.createdById:currentUser.id };
-    if(isEdit) inv.editedBy = currentUser.name;
+    if(isEdit){ inv.editedBy = currentUser.name; if(existingInv.paymentMethod) inv.paymentMethod = existingInv.paymentMethod; }
     inv.lines.forEach(l=>{ state.items = state.items.map(it => it.id===l.itemId ? {...it, qty: it.qty + (type==='buy'? l.qty : -l.qty)} : it); });
     state.parties = state.parties.map(p => p.id===partyId ? {...p, balance:(p.balance||0)+due} : p);
     if(isEdit) state.invoices = state.invoices.map(v=>v.id===inv.id?inv:v);
@@ -1587,7 +1732,15 @@ function bindParties(){
   if(addBtn) addBtn.addEventListener('click', ()=>partyModal(null));
   document.querySelectorAll('[data-pstatement]').forEach(el=>el.addEventListener('click', ()=>{ partyStatementModal(state.parties.find(p=>p.id===el.dataset.pstatement)); }));
   document.querySelectorAll('[data-pedit]').forEach(b=>b.addEventListener('click', (e)=>{ e.stopPropagation(); partyModal(state.parties.find(p=>p.id===b.dataset.pedit)); }));
-  document.querySelectorAll('[data-pdel]').forEach(b=>b.addEventListener('click', async (e)=>{ e.stopPropagation(); state.parties = state.parties.filter(p=>p.id!==b.dataset.pdel); await persist('parties'); render(); }));
+  document.querySelectorAll('[data-pdel]').forEach(b=>b.addEventListener('click', async (e)=>{
+    e.stopPropagation();
+    if(!isAdmin()) return;
+    const pt = state.parties.find(p=>p.id===b.dataset.pdel);
+    if(!pt) return;
+    const bal = pt.balance||0;
+    if(!confirm(`متأكد إنك عايز تحذف "${pt.name}"؟` + (bal ? `\nتنبيه: عليه رصيد ${money(bal)} وهيضيع مع الحذف.` : ''))) return;
+    state.parties = state.parties.filter(p=>p.id!==b.dataset.pdel); await persist('parties'); render();
+  }));
 }
 
 /* ---------------- Collections ---------------- */
@@ -1649,6 +1802,7 @@ function collectModal(party){
   });
 }
 function editPaymentModal(payment){
+  if(!isAdmin() || !payment) return;
   const html = `
   <div class="modal">
     <div class="modal-head"><h3>تعديل عملية ${payment.direction==='in'?'التحصيل':'الدفع'} - ${esc(payment.partyName)}</h3><button class="x-btn" data-close>✕</button></div>
@@ -1674,6 +1828,7 @@ function editPaymentModal(payment){
   });
 }
 async function deletePayment(payment){
+  if(!isAdmin() || !payment) return;
   if(!confirm('متأكد إنك عايز تحذف العملية دي؟ هيرجع تأثيرها على رصيد الطرف.')) return;
   state.parties = state.parties.map(p=>p.id===payment.partyId?{...p, balance:(p.balance||0)+payment.amount}:p);
   state.payments = state.payments.filter(p=>p.id!==payment.id);
@@ -1999,12 +2154,13 @@ function returnModal(){
   });
   renderRetLines(); updateRetTotal();
   modal.querySelector('#saveReturnBtn').addEventListener('click', async ()=>{
-    if(lines.length===0) return;
+    if(lines.length===0){ showToast('ضيف صنف واحد على الأقل'); return; }
+    if(lines.some(l=>!(l.qty>0) || !(l.price>=0))){ showToast('راجع الكميات والأسعار: الكمية لازم تكون أكبر من صفر'); return; }
     const partyId = modal.querySelector('#ret_party').value;
     const party = partyId ? state.parties.find(p=>p.id===partyId) : null;
     const total = lines.reduce((s,l)=>s+l.qty*l.price,0);
     const ret = {
-      id: uid(), returnNumber: 'RET-'+String(state.returns.length+1).padStart(6,'0'),
+      id: uid(), returnNumber: nextNumber(state.returns,'returnNumber','RET-'),
       partyId: partyId||null, partyName: party?party.name:'بدون عميل',
       date: modal.querySelector('#ret_date').value || todayStr(),
       lines: lines.map(l=>({...l, itemName: state.items.find(i=>i.id===l.itemId)?.name || ''})),
@@ -2019,6 +2175,7 @@ function returnModal(){
   });
 }
 async function deleteReturn(ret){
+  if(!isAdmin() || !ret) return;
   if(!confirm('متأكد إنك عايز تحذف المرتجع ده؟ هيرجع تأثيره على المخزون والرصيد.')) return;
   ret.lines.forEach(l=>{ state.items = state.items.map(it => it.id===l.itemId ? {...it, qty: it.qty - l.qty} : it); });
   if(ret.partyId){ state.parties = state.parties.map(p=>p.id===ret.partyId?{...p, balance:(p.balance||0)+ret.total}:p); }
@@ -2097,6 +2254,7 @@ function bindExpenses(){
   if(addBtn) addBtn.addEventListener('click', expenseModal);
   document.querySelectorAll('[data-edel]').forEach(b=>b.addEventListener('click', async ()=>{
     if(!isAdmin()) return;
+    if(!confirm('متأكد إنك عايز تحذف المصروف ده؟ هيرجع مبلغه لرصيد البنك.')) return;
     state.expenses = state.expenses.filter(e=>e.id!==b.dataset.edel); await persist('expenses'); render();
   }));
 }
@@ -2297,8 +2455,10 @@ function bindBackup(){
     const backup = {
       exportedAt: new Date().toISOString(),
       items: state.items, parties: state.parties, invoices: state.invoices,
-      payments: state.payments, adjustments: state.adjustments, users: state.users, expenses: state.expenses,
+      payments: state.payments, adjustments: state.adjustments, expenses: state.expenses,
+      returns: state.returns, deposits: state.deposits, purchases: state.purchases, settings: state.settings,
     };
+    if(isAdmin()) backup.users = state.users; // login codes only ever leave with an admin
     const blob = new Blob([JSON.stringify(backup, null, 2)], {type:'application/json'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -2315,9 +2475,18 @@ function bindBackup(){
     try{
       const text = await fileInput.files[0].text();
       const backup = JSON.parse(text);
-      state.items = backup.items||[]; state.parties = backup.parties||[]; state.invoices = backup.invoices||[];
-      state.payments = backup.payments||[]; state.adjustments = backup.adjustments||[]; state.users = backup.users||[]; state.expenses = backup.expenses||[];
-      await Promise.all([persist('items'),persist('parties'),persist('invoices'),persist('payments'),persist('adjustments'),persist('users'),persist('expenses')]);
+      if(!backup || !Array.isArray(backup.items) || !Array.isArray(backup.invoices)) throw new Error('not a backup');
+      const arr = v => Array.isArray(v) ? v : [];
+      state.items = arr(backup.items); state.parties = arr(backup.parties); state.invoices = arr(backup.invoices);
+      state.payments = arr(backup.payments); state.adjustments = arr(backup.adjustments); state.expenses = arr(backup.expenses);
+      // Older backups did not contain these three lists: leave the current ones alone rather than wiping them.
+      const extra = ['returns','deposits','purchases'].filter(k=>Array.isArray(backup[k]));
+      extra.forEach(k=>{ state[k] = backup[k]; });
+      // Never restore into a state with no admin, or nobody could log in again.
+      const restoreUsers = arr(backup.users).some(u=>u && u.role==='admin' && u.pin);
+      if(restoreUsers) state.users = backup.users;
+      flushChanges();
+      if(backup.settings && typeof backup.settings==='object'){ state.settings = Object.assign({...DEFAULT_SETTINGS}, backup.settings); persistSettings(); }
       showToast('تم استعادة النسخة الاحتياطية بنجاح ✅');
       render();
     }catch(e){ showToast('الملف غير صالح أو تالف'); }
@@ -2367,8 +2536,11 @@ function userModal(existingUser){
   modal.querySelector('#saveUserBtn').addEventListener('click', async ()=>{
     const name = modal.querySelector('#u_name').value.trim();
     const pin = modal.querySelector('#u_pin').value.trim();
-    if(!name || !pin) return;
-    const next = {id:f.id, name, pin, role: modal.querySelector('#u_role').value, commissionPerPiece: +modal.querySelector('#u_commission').value || 0};
+    if(!name || !pin){ showToast('اكتب الاسم وكود الدخول'); return; }
+    const newRole = modal.querySelector('#u_role').value;
+    if(state.users.some(u=>u.id!==f.id && u.name.trim().toLowerCase()===name.toLowerCase())){ showToast('فيه مستخدم تاني بنفس الاسم، اختار اسم مختلف'); return; }
+    if(isEdit && existingUser.role==='admin' && newRole!=='admin' && !state.users.some(u=>u.id!==f.id && u.role==='admin')){ showToast('مينفعش: ده المدير الوحيد، لازم يفضل فيه مدير واحد على الأقل'); return; }
+    const next = {id:f.id, name, pin, role: newRole, commissionPerPiece: +modal.querySelector('#u_commission').value || 0};
     if(isEdit) state.users = state.users.map(u=>u.id===next.id?next:u);
     else state.users.push(next);
     await persist('users');
@@ -2382,6 +2554,9 @@ function bindUsers(){
     userModal(state.users.find(u=>u.id===b.dataset.uedit));
   }));
   document.querySelectorAll('[data-udel]').forEach(b=>b.addEventListener('click', async ()=>{
+    if(!isAdmin() || b.dataset.udel===currentUser.id) return;
+    const target = state.users.find(u=>u.id===b.dataset.udel);
+    if(!target || !confirm(`متأكد إنك عايز تحذف حساب "${target.name}"؟`)) return;
     state.users = state.users.filter(u=>u.id!==b.dataset.udel); await persist('users'); render();
   }));
 }
